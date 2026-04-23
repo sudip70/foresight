@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+
+from backend.app.core.config import get_settings
+from backend.app.main import create_app
+from backend.app.ml.pipeline import get_engine
+from backend.tests.helpers import build_fixture_artifact_tree
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    artifact_root = build_fixture_artifact_tree(tmp_path)
+    dataset_root = tmp_path / "datasets"
+    dataset_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("STOCKIFY_SURROGATE_SAMPLE_SIZE", "24")
+    monkeypatch.setenv("STOCKIFY_SURROGATE_FIDELITY_THRESHOLD", "0.1")
+    monkeypatch.setenv("STOCKIFY_TOP_ASSET_TARGET_COUNT", "2")
+    monkeypatch.setenv("STOCKIFY_DEFAULT_BACKTEST_STEPS", "12")
+
+    get_settings.cache_clear()
+    get_engine.cache_clear()
+
+    with TestClient(create_app()) as test_client:
+        yield test_client
+
+    get_settings.cache_clear()
+    get_engine.cache_clear()
+

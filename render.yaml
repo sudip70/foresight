@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: stockify-backend
+    runtime: python
+    plan: free
+    buildCommand: python3.11 -m pip install --upgrade pip && python3.11 -m pip install -r requirements.txt
+    startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.14
+      - key: STOCKIFY_ARTIFACT_ROOT
+        value: /opt/render/project/src/artifacts/processed
+      - key: STOCKIFY_DATASET_ROOT
+        value: /opt/render/project/src/datasets/raw
