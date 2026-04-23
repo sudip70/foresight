@@ -1,197 +1,126 @@
-# 🧠 Stock Portfolio Allocation & Risk Management using Reinforcement Learning + LLM Sentiment
+# Stockify
 
-This project combines **Reinforcement Learning (RL)**, **contextual bandits**, and **large language models (LLMs)** to create a multi-agent financial decision-making system for real-time **stock portfolio allocation and risk management**.
+Stockify is a split web application for RL-driven portfolio allocation and model explainability.
 
-Agents specialize in different asset classes (e.g., stocks, ETFs, options, crypto) and merge their strategies via **meta-RL**. The system is **regime-aware** (bull/bear/sideways) and uses **macroeconomic indicators** (inflation, GDP, interest rates) for context-aware policy selection. Sentiment signals are extracted from social media using LLMs and integrated into the trading pipeline.
+Phase 1 replaces the legacy Streamlit prototype with:
 
----
+- a Python backend built with FastAPI
+- a static HTML/CSS/JS frontend for GitHub Pages
+- a cleaned artifact layout for RL inference and backtesting
+- surrogate-based SHAP explanations for allocations
 
-## 🔧 Features
+## Project Layout
 
-* **Multi-Agent RL System**:
+- `backend/`: FastAPI service, canonical inference pipeline, SHAP explainers, tests
+- `frontend/`: static dashboard for GitHub Pages
+- `offline/`: data-repair and offline preparation scripts
+- `artifacts/processed/`: active RL model artifacts and aligned processed arrays
+- `datasets/raw/`: raw and legacy source datasets used by offline scripts
+- `archive/legacy/`: retired Streamlit app, training scripts, experiments, and generated clutter
 
-  * Specialized agents for equities, ETFs, options, and crypto.
-  * Merged using **meta-reinforcement learning** and **contextual bandits**.
+## Runtime Scope
 
-* **Market Regime Awareness**:
+Phase 1 runtime supports:
 
-  * Detects bull, bear, and sideways markets.
-  * Factors in macroeconomic conditions (e.g., inflation, recession indicators).
+- health and dependency checks
+- model and artifact metadata
+- allocation inference
+- surrogate-SHAP explainability
+- deterministic historical backtests
 
-* **LLM-Powered Sentiment Analysis**:
+Phase 1 does not include:
 
-  * Real-time social media (Twitter/X, Reddit, financial news).
-  * Uses fine-tuned or zero-shot LLMs for market sentiment extraction.
-  * Sentiment integrated as contextual signals for agents.
+- LLM or sentiment ingestion
+- live trading execution
+- backend-managed retraining jobs
+- backend-managed market-data refresh jobs
 
-* **Explainability & Interpretability**:
-
-  * SHAP, LIME, and attention visualizations to interpret model decisions.
-  * Agent-level and asset-level decision explanations.
-
-* **Real-Time Paper Trading**:
-
-  * Hooks into **Alpaca**, **Interactive Brokers (IBKR) Sandbox**, or **QuantConnect**.
-  * Executes trades and adjusts portfolio live via APIs.
-  * Tracks performance metrics and adapts policies on-the-fly.
-
-* **Risk Management**:
-
-  * Dynamic portfolio rebalancing based on risk scores.
-  * Uses Value at Risk (VaR), CVaR, and volatility-adjusted returns.
-  * Handles drawdowns, exposure limits, and stop-loss triggers.
-
----
-
-## 🏐 Architecture
-
-```
-[Data Ingestion] --> [Sentiment Analysis (LLM)] --->|
-[Market Regime Detection]                          |
-[Macroeconomic Indicators] ---------------------> [Contextual RL Agents]
-                                                   ↓
-                                   [Meta-RL Policy Merger / Bandit Selector]
-                                                   ↓
-                                    [Portfolio Allocation + Risk Manager]
-                                                   ↓
-                                      [Paper Trading API Integration]
-                                                   ↓
-                                          [Explainability Module]
-```
-
----
-
-## 🚀 Getting Started
-
-### 1. Clone the Repository
+## Local Setup
 
 ```bash
-git clone https://github.com/yourusername/rl-stock-allocation.git
-cd rl-stock-allocation
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-dev.txt
 ```
 
-### 2. Install Requirements
+## Running the Backend
 
 ```bash
-pip install -r requirements.txt
+source .venv/bin/activate
+uvicorn backend.app.main:app --reload
 ```
 
-### 3. Set Up API Keys
+The API is served from `http://localhost:8000` and the interactive docs are available at `/docs`.
 
-Create a `.env` file and add credentials for:
+## Frontend
 
-* Alpaca / Interactive Brokers API
-* OpenAI or HuggingFace (for LLMs)
-* Reddit/Twitter API (for sentiment)
+The frontend is a static site under `frontend/`. Open `frontend/index.html` locally for basic development, or publish the directory to GitHub Pages.
 
-```env
-ALPACA_API_KEY=your_key
-ALPACA_SECRET=your_secret
-OPENAI_API_KEY=your_key
-TWITTER_BEARER_TOKEN=your_token
+The frontend expects the backend base URL to be configurable from the page so it can talk to either local development or the Render deployment.
+
+## Artifact Repair
+
+The current historical artifacts were generated by inconsistent preprocessing steps. Before relying on them in production, run:
+
+```bash
+source .venv/bin/activate
+python offline/repair_processed_artifacts.py
 ```
 
----
+This script aligns per-asset processed arrays, writes metadata, and records any trimming performed to repair mismatched row counts.
 
-## 📊 Datasets Used
+## Market Data Refresh
 
-* Historical price data (Yahoo Finance, Alpaca, Quandl)
-* Macroeconomic indicators (FRED API)
-* Reddit & Twitter sentiment (Pushshift, Tweepy)
-* News headlines (NewsAPI, Finnhub)
+The legacy training code built several indicators from `Close` only and reused that series as fake `High`, `Low`, and `Volume`. The active offline pipeline now rebuilds features from real OHLCV inputs downloaded from Yahoo Finance.
 
----
+To refresh raw market data and rebuild the processed bundles with OHLCV-derived indicators:
 
-## 🧠 Models and Algorithms
-
-* **RL Algorithms**: PPO, A2C, DDPG (via `stable-baselines3`)
-* **Contextual Bandits**: LinUCB, Thompson Sampling
-* **Meta-RL**: PEARL, MAML-style merging of agents
-* **LLMs**: OpenAI GPT, Falcon, LLaMA2 (with financial fine-tuning)
-* **Explainability**: SHAP, attention heatmaps
-
----
-
-## 📊 Evaluation Metrics
-
-* Sharpe Ratio
-* Sortino Ratio
-* Maximum Drawdown
-* Alpha/Beta
-* Policy Improvement over baseline
-* Trade accuracy with sentiment
-
----
-
-## 🔐 API Integrations
-
-* 🟢 **Alpaca** ([https://alpaca.markets](https://alpaca.markets))
-* 🔣 **Interactive Brokers** (sandbox mode)
-* 🟣 **OpenAI / HuggingFace**
-* 🔹 **Twitter**, **Reddit**, **FRED**, **NewsAPI**
-
----
-
-## 🧪 Project Status
-
-* [x] Initial agents trained for each asset type
-* [x] LLM-based sentiment integrated
-* [x] Market regime detector working (trend/macro)
-* [x] Real-time paper trading setup via Alpaca
-* [ ] Performance dashboard and live analytics
-* [ ] Backtest results visualization
-
----
-
-## 📂 Folder Structure
-
-```
-📁 agents/                 # RL agents for each asset class
-📁 data/                   # Datasets and preprocessing scripts
-📁 envs/                   # Custom OpenAI Gym environments
-📁 sentiment/              # LLM and NLP-based sentiment module
-📁 trading/                # Real-time trading hooks (Alpaca, IBKR)
-📁 explainability/         # SHAP, LIME, and visual interpreters
-📁 config/                 # Config files and hyperparameters
-📁 notebooks/              # EDA and experimentation notebooks
-📁 utils/                  # Utility scripts
-🔍 main.py                 # Entry point
-🔍 requirements.txt
+```bash
+source .venv/bin/activate
+python offline/rebuild_market_data.py
 ```
 
----
+This writes:
 
-## 🤖 Future Roadmap
+- raw downloaded OHLCV snapshots to `datasets/raw/market/*.csv`
+- aligned close-price matrices to `artifacts/processed/*/prices.npy`
+- OHLCV tensors to `artifacts/processed/*/ohlcv.npy`
+- raw and scaled feature arrays for micro and macro inputs
+- updated metadata describing the source date range and feature version
 
-* ✅ Add performance dashboard using Streamlit or Dash
-* ↻ Support reinforcement learning fine-tuning with live feedback
-* 🦹‍♂️ Expand to crypto-specific signals (on-chain data, sentiment)
-* 📉 Add adversarial agents for stress testing portfolio strategies
-* 🧠 Plug-in LLMs to generate investment rationales for trades
+By default the script reuses the existing scaler pickle files so the current RL artifacts remain as compatible as possible. If you are rebuilding for retraining rather than refreshing live inputs, use `--fit-new-scalers`.
 
----
+## PPO Retraining
 
-## 🙋 Contributing
+Once the OHLCV bundles are refreshed, retrain the stock, crypto, and ETF PPO agents with:
 
-PRs are welcome! Please open an issue first to discuss major changes.
+```bash
+source .venv/bin/activate
+python offline/train_ppo_agents.py --total-timesteps 20000 --eval-freq 2000 --device cpu
+```
 
----
+This script:
 
-## 📜 License
+- splits each asset bundle chronologically into train and evaluation segments
+- trains a PPO policy against the cleaned observation layout used by the backend
+- backs up the existing `model.zip` before replacing it
+- writes `training_summary.json` and updates bundle metadata with evaluation metrics
 
-MIT License — feel free to use, modify, and build upon this.
+The SAC meta-agent should be retrained only after the PPO sub-agents have been refreshed and validated.
 
----
+## Tests
 
-## 🔗 References
+```bash
+source .venv/bin/activate
+pytest backend/tests
+```
 
-* [Alpaca Docs](https://alpaca.markets/docs/)
-* [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3)
-* [OpenAI API](https://platform.openai.com/docs)
-* [Market Sentiment LLM papers](https://arxiv.org)
+The automated tests use synthetic fixture artifacts and fixed-weight policies so API contracts and explainability logic can be verified without touching the production model bundle.
 
----
+## Notes
 
-## ✨ Acknowledgements
-
-Thanks to open-source contributors, financial research datasets, and the ML research community for inspiration.
+- FastAPI is the only active runtime entrypoint.
+- GitHub Pages serves the frontend as static assets only.
+- Render serves the backend.
+- FRED access, if needed for offline jobs, must come from `FRED_API_KEY` in the environment. No secrets are hard-coded in the repository.

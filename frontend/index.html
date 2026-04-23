@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stockify</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div>
+        <p class="eyebrow">RL Allocation + Explainability</p>
+        <h1>Stockify</h1>
+        <p class="lede">
+          A split web app for portfolio allocation, surrogate-SHAP explanations,
+          and deterministic backtests.
+        </p>
+      </div>
+      <div class="endpoint-card">
+        <label for="apiBase">Backend URL</label>
+        <input id="apiBase" type="url" value="http://localhost:8000" />
+        <button id="saveApiBase">Use Backend</button>
+        <p id="apiStatus" class="muted">Waiting for connection.</p>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel controls">
+        <div class="field-group">
+          <label for="amount">Investment amount</label>
+          <input id="amount" type="number" min="1000" value="10000" step="500" />
+        </div>
+        <div class="field-group">
+          <label for="risk">Risk appetite</label>
+          <input id="risk" type="range" min="0" max="1" step="0.01" value="0.5" />
+          <span id="riskValue">0.50</span>
+        </div>
+        <div class="field-group">
+          <label for="duration">Projection horizon (days)</label>
+          <input id="duration" type="number" min="1" value="30" step="1" />
+        </div>
+        <div class="field-group">
+          <label for="windowSize">Window size</label>
+          <input id="windowSize" type="number" min="2" value="60" step="1" />
+        </div>
+        <div class="field-group action-row">
+          <button id="runInference">Run allocation</button>
+          <button id="runExplanations">Explain allocation</button>
+          <button id="runBacktest">Run backtest</button>
+        </div>
+      </section>
+
+      <section class="tabs">
+        <button class="tab is-active" data-tab="allocation">Allocation</button>
+        <button class="tab" data-tab="explain">Explanations</button>
+        <button class="tab" data-tab="diagnostics">Diagnostics</button>
+      </section>
+
+      <section id="allocation" class="panel view is-active">
+        <div class="grid two">
+          <article class="card">
+            <h2>Summary</h2>
+            <div id="summaryCards" class="summary-grid"></div>
+          </article>
+          <article class="card">
+            <h2>Current Macro Snapshot</h2>
+            <div id="macroSnapshot" class="stack"></div>
+          </article>
+        </div>
+        <article class="card">
+          <h2>Class Allocations</h2>
+          <div id="classAllocations"></div>
+        </article>
+        <article class="card">
+          <h2>Asset Allocations</h2>
+          <div id="assetAllocations"></div>
+        </article>
+      </section>
+
+      <section id="explain" class="panel view">
+        <article class="card">
+          <h2>Surrogate SHAP Targets</h2>
+          <div id="explanationCards" class="stack"></div>
+        </article>
+      </section>
+
+      <section id="diagnostics" class="panel view">
+        <div class="grid two">
+          <article class="card">
+            <h2>Backend Health</h2>
+            <pre id="healthBlock" class="json-block"></pre>
+          </article>
+          <article class="card">
+            <h2>Model Metadata</h2>
+            <pre id="modelsBlock" class="json-block"></pre>
+          </article>
+        </div>
+        <article class="card">
+          <h2>Backtest Metrics</h2>
+          <div id="backtestSummary" class="summary-grid"></div>
+        </article>
+        <article class="card">
+          <h2>Equity Curve</h2>
+          <div id="equityCurve"></div>
+        </article>
+      </section>
+    </main>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

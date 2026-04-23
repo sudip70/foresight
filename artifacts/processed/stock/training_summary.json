@@ -1,0 +1,14 @@
+{
+  "asset_class": "stock",
+  "backup_path": "/Users/sudipshrestha/Projects-website/stockify/Stockify_Backup/artifacts/processed/stock/model.backup_before_retrain_20260423T030323Z.zip",
+  "eval_mean_benchmark_alpha": 0.0019253115445217945,
+  "eval_mean_final_value": 1.5247888097828857,
+  "eval_mean_max_drawdown": 0.06777779571283726,
+  "eval_mean_reward": -96.0680253979766,
+  "eval_mean_sharpe": 4.32521443733819,
+  "eval_rows": 629,
+  "model_path": "/Users/sudipshrestha/Projects-website/stockify/Stockify_Backup/artifacts/processed/stock/model.zip",
+  "total_timesteps": 250000,
+  "train_rows": 2273,
+  "trained_at": "2026-04-23T03:03:23.953107+00:00"
+}
