@@ -41,6 +41,8 @@ def build_parser() -> ArgumentParser:
     parser.add_argument("--drawdown-penalty-scale", type=float, default=0.05)
     parser.add_argument("--downside-penalty-scale", type=float, default=0.25)
     parser.add_argument("--benchmark-reward-scale", type=float, default=0.5)
+    parser.add_argument("--horizon-reward-scale", type=float, default=1.0)
+    parser.add_argument("--diversification-reward-scale", type=float, default=0.10)
     parser.add_argument("--target-daily-volatility", type=float, default=0.014)
     parser.add_argument("--target-volatility-penalty-scale", type=float, default=0.25)
     parser.add_argument("--reward-scale", type=float, default=100.0)
@@ -48,6 +50,11 @@ def build_parser() -> ArgumentParser:
     parser.add_argument("--max-stock-weight", type=float, default=0.85)
     parser.add_argument("--max-crypto-weight", type=float, default=0.30)
     parser.add_argument("--max-etf-weight", type=float, default=0.70)
+    parser.add_argument("--max-cash-weight", type=float, default=0.95)
+    parser.add_argument("--min-expected-daily-return", type=float, default=0.0)
+    parser.add_argument("--cash-shortfall-penalty-scale", type=float, default=0.0)
+    parser.add_argument("--no-cash", action="store_true")
+    parser.add_argument("--cash-annual-return", type=float, default=0.04)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--buffer-size", type=int, default=100_000)
     parser.add_argument("--learning-starts", type=int, default=2_000)
@@ -93,6 +100,8 @@ def main() -> None:
             drawdown_penalty_scale=args.drawdown_penalty_scale,
             downside_penalty_scale=args.downside_penalty_scale,
             benchmark_reward_scale=args.benchmark_reward_scale,
+            horizon_reward_scale=args.horizon_reward_scale,
+            diversification_reward_scale=args.diversification_reward_scale,
             target_daily_volatility=args.target_daily_volatility,
             target_volatility_penalty_scale=args.target_volatility_penalty_scale,
             reward_scale=args.reward_scale,
@@ -100,6 +109,11 @@ def main() -> None:
             max_stock_weight=args.max_stock_weight,
             max_crypto_weight=args.max_crypto_weight,
             max_etf_weight=args.max_etf_weight,
+            max_cash_weight=args.max_cash_weight,
+            min_expected_daily_return=args.min_expected_daily_return,
+            cash_shortfall_penalty_scale=args.cash_shortfall_penalty_scale,
+            cash_enabled=not args.no_cash,
+            cash_annual_return=args.cash_annual_return,
             learning_rate=args.learning_rate,
             buffer_size=args.buffer_size,
             learning_starts=args.learning_starts,

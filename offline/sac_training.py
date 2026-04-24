@@ -9,7 +9,9 @@ import tempfile
 
 import gymnasium as gym
 from gymnasium import spaces
+import joblib
 import numpy as np
+from sklearn.preprocessing import RobustScaler
 from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.monitor import Monitor
@@ -17,12 +19,22 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 
 from backend.app.ml.artifacts import ASSET_CLASSES, AssetArtifacts, load_asset_artifacts
 from backend.app.ml.envs import (
-    MetaPortfolioEnv,
     SingleAgentEnv,
     build_meta_observation,
     meta_observation_dim,
 )
-from backend.app.ml.policies import apply_class_guardrails, normalize_weights
+from backend.app.ml.policies import (
+    apply_class_guardrails,
+    normalize_action_with_cash_sleeve,
+    normalize_weights,
+    normalize_weights_with_caps,
+)
+
+
+CASH_ASSET_CLASS = "cash"
+META_V3_FEATURE_VERSION = "sac-meta-v3-globalmacro-cashaware"
+META_CLASS_FEATURE_DIM = 12
+META_SLEEVE_ACTION_LAYOUT = "stock_crypto_etf_cash_sleeves"
 
 
 @dataclass(frozen=True)
@@ -40,6 +52,8 @@ class SACMetaTrainingConfig:
     drawdown_penalty_scale: float = 0.05
     downside_penalty_scale: float = 0.25
     benchmark_reward_scale: float = 0.5
+    horizon_reward_scale: float = 1.0
+    diversification_reward_scale: float = 0.10
     target_daily_volatility: float | None = 0.014
     target_volatility_penalty_scale: float = 0.25
     reward_scale: float = 100.0
@@ -47,6 +61,11 @@ class SACMetaTrainingConfig:
     max_stock_weight: float = 0.85
     max_crypto_weight: float = 0.30
     max_etf_weight: float = 0.70
+    max_cash_weight: float = 0.95
+    min_expected_daily_return: float = 0.0
+    cash_shortfall_penalty_scale: float = 0.0
+    cash_enabled: bool = True
+    cash_annual_return: float = 0.04
     learning_rate: float = 3e-4
     buffer_size: int = 100_000
     learning_starts: int = 2_000
@@ -101,12 +120,59 @@ def _class_ranges(assets: dict[str, AssetArtifacts]) -> dict[str, tuple[int, int
         width = len(assets[asset_class].tickers)
         ranges[asset_class] = (cursor, cursor + width)
         cursor += width
+    ranges[CASH_ASSET_CLASS] = (cursor, cursor + 1)
     return ranges
+
+
+def _cash_daily_return(config: SACMetaTrainingConfig) -> float:
+    return (1.0 + config.cash_annual_return) ** (1.0 / 252.0) - 1.0
+
+
+def _risk_cash_cap(risk: float, *, configured_max: float) -> float:
+    risk_value = float(np.clip(risk, 0.0, 1.0))
+    dynamic_cap = 0.08 + ((1.0 - risk_value) * 0.42)
+    return float(min(float(configured_max), dynamic_cap))
+
+
+def _risk_class_caps(config: SACMetaTrainingConfig, risk: float) -> dict[str, float]:
+    risk_value = float(np.clip(risk, 0.0, 1.0))
+    caps = {
+        "stock": min(config.max_stock_weight, 0.55 + (0.25 * risk_value)),
+        "crypto": min(config.max_crypto_weight, 0.04 + (0.31 * risk_value)),
+        "etf": min(config.max_etf_weight, 0.72),
+    }
+    if config.cash_enabled:
+        caps[CASH_ASSET_CLASS] = _risk_cash_cap(risk_value, configured_max=config.max_cash_weight)
+    return caps
+
+
+def _risk_class_floors(config: SACMetaTrainingConfig, risk: float) -> dict[str, float]:
+    risk_value = float(np.clip(risk, 0.0, 1.0))
+    floors = {
+        "stock": 0.12 + (0.08 * risk_value),
+        "crypto": 0.02 * risk_value,
+        "etf": 0.12 + (0.20 * (1.0 - risk_value)),
+    }
+    if config.cash_enabled:
+        floors[CASH_ASSET_CLASS] = 0.03 * (1.0 - risk_value)
+    return floors
+
+
+def _risk_concentration_target(n_assets: int, risk: float) -> float:
+    risk_value = float(np.clip(risk, 0.0, 1.0))
+    equal_concentration = 1.0 / max(int(n_assets), 1)
+    return equal_concentration + (risk_value * (0.45 - equal_concentration))
 
 
 def _sub_agent_max_weight(bundle: AssetArtifacts) -> float | None:
     config = bundle.metadata.get("ppo_training_config", {})
     max_weight = config.get("max_asset_weight")
+    return None if max_weight is None else float(max_weight)
+
+
+def _sub_agent_max_cash_weight(bundle: AssetArtifacts) -> float | None:
+    config = bundle.metadata.get("ppo_training_config", {})
+    max_weight = config.get("max_cash_weight")
     return None if max_weight is None else float(max_weight)
 
 
@@ -125,7 +191,16 @@ def _compute_mu_cov_diag(prices: np.ndarray, window_size: int) -> tuple[np.ndarr
     return mu, cov_diag
 
 
-def _build_context(artifact_root: Path) -> dict:
+def _transform_macro_block(
+    matrix: np.ndarray,
+    scaler: RobustScaler,
+) -> np.ndarray:
+    transformed = scaler.transform(np.asarray(matrix, dtype=float))
+    transformed = np.clip(transformed, -5.0, 5.0)
+    return np.nan_to_num(transformed, nan=0.0, posinf=0.0, neginf=0.0).astype(float)
+
+
+def _build_context(artifact_root: Path, config: SACMetaTrainingConfig) -> dict:
     assets = {
         asset_class: load_asset_artifacts(artifact_root, asset_class, strict=False)
         for asset_class in ASSET_CLASSES
@@ -140,23 +215,46 @@ def _build_context(artifact_root: Path) -> dict:
         positions = _common_date_positions(bundle.dates, common_dates)
         aligned_assets[asset_class] = {
             "prices": bundle.prices[positions],
+            "risky_prices": bundle.prices[positions, : len(bundle.tickers)],
             "ohlcv": bundle.ohlcv[positions],
             "regimes": bundle.regimes[positions],
             "micro": bundle.micro_indicators[positions],
             "macro": bundle.macro_indicators[positions],
+            "macro_raw": bundle.macro_indicators_raw[positions],
         }
 
+    risky_prices = np.hstack([aligned_assets[name]["risky_prices"] for name in ASSET_CLASSES])
+    if config.cash_enabled:
+        cash_prices = np.cumprod(
+            np.full(common_dates.shape[0], 1.0 + _cash_daily_return(config), dtype=float)
+        ).reshape(-1, 1)
+        prices = np.hstack([risky_prices, cash_prices])
+    else:
+        prices = risky_prices
+
+    class_ranges = _class_ranges(assets)
+    if not config.cash_enabled:
+        class_ranges.pop(CASH_ASSET_CLASS, None)
+
+    global_macro_source = max(
+        ASSET_CLASSES,
+        key=lambda name: aligned_assets[name]["macro_raw"].shape[1],
+    )
     return {
         "assets": assets,
         "aligned_assets": aligned_assets,
         "dates": common_dates,
-        "prices": np.hstack([aligned_assets[name]["prices"] for name in ASSET_CLASSES]),
+        "prices": prices,
         "micro": np.hstack([aligned_assets[name]["micro"] for name in ASSET_CLASSES]),
-        "macro": np.hstack([aligned_assets[name]["macro"] for name in ASSET_CLASSES]),
+        "macro": np.asarray(aligned_assets[global_macro_source]["macro_raw"], dtype=float),
         "regimes": _mode_regimes(
             np.vstack([aligned_assets[name]["regimes"] for name in ASSET_CLASSES])
         ),
-        "class_ranges": _class_ranges(assets),
+        "class_ranges": class_ranges,
+        "global_macro_feature_names": assets[global_macro_source].metadata.get(
+            "raw_macro_feature_names",
+            assets[global_macro_source].metadata.get("macro_feature_names", []),
+        ),
     }
 
 
@@ -184,6 +282,7 @@ def _slice_context(context: dict, data_slice: slice) -> dict:
         "micro": context["micro"][data_slice],
         "macro": context["macro"][data_slice],
         "regimes": context["regimes"][data_slice],
+        "global_macro_feature_names": context["global_macro_feature_names"],
     }
 
 
@@ -200,41 +299,113 @@ def split_meta_context(context: dict, config: SACMetaTrainingConfig) -> tuple[di
     )
 
 
-def _precompute_sub_agent_weights(context: dict, config: SACMetaTrainingConfig) -> dict[float, np.ndarray]:
-    outputs: dict[float, np.ndarray] = {}
+def _fit_meta_macro_scaler(train_context: dict, eval_context: dict) -> tuple[RobustScaler, dict, dict]:
+    scaler = RobustScaler(quantile_range=(5.0, 95.0))
+    scaler.fit(np.asarray(train_context["macro"], dtype=float))
+    train_scaled = _transform_macro_block(train_context["macro"], scaler)
+    eval_scaled = _transform_macro_block(eval_context["macro"], scaler)
+    return (
+        scaler,
+        {**train_context, "macro": train_scaled},
+        {**eval_context, "macro": eval_scaled},
+    )
+
+
+def _predict_sub_agent_allocation(
+    *,
+    bundle: AssetArtifacts,
+    env: SingleAgentEnv,
+    prev_weights: np.ndarray | None,
+    step: int,
+) -> dict:
+    observation = env.observation_at(step, prev_weights=prev_weights)
+    full_weights = normalize_action_with_cash_sleeve(
+        bundle.policy.predict(observation),
+        risky_asset_count=len(bundle.tickers),
+        max_risky_weight=_sub_agent_max_weight(bundle),
+        max_cash_weight=_sub_agent_max_cash_weight(bundle),
+    )
+    risky_weights = np.asarray(full_weights[: len(bundle.tickers)], dtype=float)
+    return {
+        "full_weights": np.asarray(full_weights, dtype=float),
+        "weights": risky_weights,
+        "cash_weight": max(1.0 - float(risky_weights.sum()), 0.0),
+    }
+
+
+def _compose_meta_sub_agent_signal(
+    *,
+    asset_outputs: dict[str, dict],
+    cash_enabled: bool,
+) -> np.ndarray:
+    class_count = float(len(ASSET_CLASSES))
+    risky_signal = np.concatenate(
+        [asset_outputs[asset_class]["weights"] / class_count for asset_class in ASSET_CLASSES]
+    ).astype(float)
+    if not cash_enabled:
+        return normalize_weights(risky_signal)
+
+    cash_prior = float(
+        np.mean([asset_outputs[asset_class]["cash_weight"] for asset_class in ASSET_CLASSES])
+    )
+    combined = np.concatenate([risky_signal, np.array([cash_prior], dtype=float)])
+    total = float(combined.sum())
+    if total > 1e-12:
+        combined = combined / total
+    return combined
+
+
+def _precompute_sub_agent_outputs(context: dict, config: SACMetaTrainingConfig) -> dict[float, dict]:
+    outputs: dict[float, dict] = {}
     rows = context["prices"].shape[0]
     for risk in config.risk_values:
         previous_by_class: dict[str, np.ndarray] | None = None
-        risk_weights = np.zeros_like(context["prices"], dtype=float)
+        meta_signal = np.zeros_like(context["prices"], dtype=float)
+        risky_weights = {
+            asset_class: np.zeros((rows, len(context["assets"][asset_class].tickers)), dtype=float)
+            for asset_class in ASSET_CLASSES
+        }
+        cash_weights = {
+            asset_class: np.zeros(rows, dtype=float)
+            for asset_class in ASSET_CLASSES
+        }
+        envs = {
+            asset_class: SingleAgentEnv(
+                prices=context["aligned_assets"][asset_class]["prices"],
+                ohlcv=context["aligned_assets"][asset_class]["ohlcv"],
+                regimes=context["aligned_assets"][asset_class]["regimes"],
+                micro_indicators=context["aligned_assets"][asset_class]["micro"],
+                macro_indicators=context["aligned_assets"][asset_class]["macro"],
+                risk_appetite=float(risk),
+            )
+            for asset_class in ASSET_CLASSES
+        }
         for step in range(rows):
-            class_weights = []
+            asset_outputs = {}
             next_previous: dict[str, np.ndarray] = {}
             for asset_class in ASSET_CLASSES:
                 bundle = context["assets"][asset_class]
-                asset_context = context["aligned_assets"][asset_class]
-                env = SingleAgentEnv(
-                    prices=asset_context["prices"],
-                    ohlcv=asset_context["ohlcv"],
-                    regimes=asset_context["regimes"],
-                    micro_indicators=asset_context["micro"],
-                    macro_indicators=asset_context["macro"],
-                    risk_appetite=risk,
+                previous = previous_by_class.get(asset_class) if previous_by_class else None
+                output = _predict_sub_agent_allocation(
+                    bundle=bundle,
+                    env=envs[asset_class],
+                    prev_weights=previous,
+                    step=step,
                 )
-                previous = (
-                    previous_by_class.get(asset_class)
-                    if previous_by_class is not None
-                    else None
-                )
-                observation = env.observation_at(step, prev_weights=previous)
-                weights = normalize_weights(
-                    bundle.policy.predict(observation),
-                    max_weight=_sub_agent_max_weight(bundle),
-                )
-                class_weights.append(weights)
-                next_previous[asset_class] = weights
+                asset_outputs[asset_class] = output
+                next_previous[asset_class] = output["full_weights"]
+                risky_weights[asset_class][step] = output["weights"]
+                cash_weights[asset_class][step] = output["cash_weight"]
             previous_by_class = next_previous
-            risk_weights[step] = normalize_weights(np.concatenate(class_weights))
-        outputs[float(risk)] = risk_weights
+            meta_signal[step] = _compose_meta_sub_agent_signal(
+                asset_outputs=asset_outputs,
+                cash_enabled=config.cash_enabled,
+            )
+        outputs[float(risk)] = {
+            "meta_signal": meta_signal,
+            "risky_weights": risky_weights,
+            "cash_weights": cash_weights,
+        }
     return outputs
 
 
@@ -274,13 +445,11 @@ class SACMetaPortfolioEnv(gym.Env):
         self.macro = np.asarray(context["macro"], dtype=float)
         self.regimes = np.asarray(context["regimes"], dtype=int)
         self.class_ranges = context["class_ranges"]
-        self.max_class_weights = {
-            "stock": config.max_stock_weight,
-            "crypto": config.max_crypto_weight,
-            "etf": config.max_etf_weight,
-        }
+        self.sleeve_names = list(ASSET_CLASSES)
+        if config.cash_enabled:
+            self.sleeve_names.append(CASH_ASSET_CLASS)
         self.mu, self.cov_diag = _compute_mu_cov_diag(self.prices, config.window_size)
-        self.sub_agent_weights_by_risk = _precompute_sub_agent_weights(context, config)
+        self.sub_agent_outputs_by_risk = _precompute_sub_agent_outputs(context, config)
         self.risk_values = tuple(float(value) for value in config.risk_values)
         self.n_assets = int(self.prices.shape[1])
         self.max_start = self.prices.shape[0] - config.episode_length - 2
@@ -291,6 +460,7 @@ class SACMetaPortfolioEnv(gym.Env):
             n_assets=self.n_assets,
             micro_dim=self.micro.shape[1],
             macro_dim=self.macro.shape[1],
+            class_feature_dim=META_CLASS_FEATURE_DIM,
         )
         self.observation_space = spaces.Box(
             low=-np.inf,
@@ -301,7 +471,7 @@ class SACMetaPortfolioEnv(gym.Env):
         self.action_space = spaces.Box(
             low=0.0,
             high=1.0,
-            shape=(self.n_assets,),
+            shape=(len(self.sleeve_names),),
             dtype=np.float32,
         )
         self.current_step = config.window_size
@@ -310,6 +480,9 @@ class SACMetaPortfolioEnv(gym.Env):
         self.peak_value = 1.0
         self.prev_weights = np.ones(self.n_assets, dtype=float) / self.n_assets
         self.risk_appetite = 0.5
+        self.episode_log_return = 0.0
+        self.episode_agent_log_return = 0.0
+        self.concentration_history: list[float] = []
 
     def _sample_risk(self) -> float:
         if self.fixed_risk is not None:
@@ -320,20 +493,104 @@ class SACMetaPortfolioEnv(gym.Env):
     def _risk_key(self) -> float:
         return min(self.risk_values, key=lambda value: abs(value - self.risk_appetite))
 
-    def _sub_agent_weights(self) -> np.ndarray:
-        return self.sub_agent_weights_by_risk[self._risk_key()][self.current_step]
+    def _sub_agent_snapshot(self) -> dict:
+        return self.sub_agent_outputs_by_risk[self._risk_key()]
 
-    def _class_features(self, sub_agent_weights: np.ndarray) -> np.ndarray:
+    def _sub_agent_weights(self) -> np.ndarray:
+        return self._sub_agent_snapshot()["meta_signal"][self.current_step]
+
+    def _class_features(self) -> np.ndarray:
+        snapshot = self._sub_agent_snapshot()
         features = []
-        for _, (start, end) in self.class_ranges.items():
-            class_weights = normalize_weights(sub_agent_weights[start:end])
+        for asset_class in ASSET_CLASSES:
+            start, end = self.class_ranges[asset_class]
+            class_signal = snapshot["risky_weights"][asset_class][self.current_step]
+            class_weights = normalize_weights(class_signal)
             class_mu = self.mu[self.current_step, start:end]
             class_cov_diag = self.cov_diag[self.current_step, start:end]
             class_expected_return = float(np.dot(class_weights, class_mu))
             class_volatility = float(np.sqrt(max(np.dot(class_weights**2, class_cov_diag), 0.0)))
             class_prev_weight = float(self.prev_weights[start:end].sum())
-            features.extend([class_expected_return, class_volatility, class_prev_weight])
+            class_cash_weight = float(snapshot["cash_weights"][asset_class][self.current_step])
+            features.extend(
+                [class_expected_return, class_volatility, class_prev_weight, class_cash_weight]
+            )
         return np.asarray(features, dtype=np.float32)
+
+    def _cash_index(self) -> int | None:
+        if not self.config.cash_enabled or CASH_ASSET_CLASS not in self.class_ranges:
+            return None
+        return self.class_ranges[CASH_ASSET_CLASS][0]
+
+    def _asset_weight_caps(self) -> np.ndarray:
+        caps = np.full(self.n_assets, self.config.max_asset_weight, dtype=float)
+        cash_index = self._cash_index()
+        if cash_index is not None:
+            caps[cash_index] = _risk_cash_cap(
+                self.risk_appetite,
+                configured_max=self.config.max_cash_weight,
+            )
+        return caps
+
+    def _apply_sleeve_constraints(self, action: np.ndarray) -> dict[str, float]:
+        floors = _risk_class_floors(self.config, self.risk_appetite)
+        caps = _risk_class_caps(self.config, self.risk_appetite)
+        floor_total = min(sum(floors.get(name, 0.0) for name in self.sleeve_names), 0.85)
+        remaining = max(1.0 - floor_total, 0.0)
+        capacity = np.asarray(
+            [
+                max(caps.get(name, 1.0) - floors.get(name, 0.0), 0.0)
+                for name in self.sleeve_names
+            ],
+            dtype=float,
+        )
+        if remaining <= 1e-12:
+            constrained = {name: floors.get(name, 0.0) for name in self.sleeve_names}
+            total = sum(constrained.values())
+            return {name: value / total for name, value in constrained.items()}
+
+        scores = np.clip(np.asarray(action, dtype=float).reshape(-1), 0.0, None)
+        if scores.shape[0] != len(self.sleeve_names):
+            raise ValueError("SAC meta action dimension must match sleeve count")
+        if float(scores.sum()) <= 1e-12:
+            scores = np.ones_like(scores)
+        caps_for_remaining = capacity / remaining
+        if float(caps_for_remaining.sum()) < 1.0:
+            caps_for_remaining = caps_for_remaining / max(float(caps_for_remaining.sum()), 1e-12)
+        variable = normalize_weights_with_caps(scores, caps_for_remaining)
+        constrained = {
+            name: floors.get(name, 0.0) + (remaining * float(variable[index]))
+            for index, name in enumerate(self.sleeve_names)
+        }
+        total = sum(constrained.values())
+        return {name: value / total for name, value in constrained.items()}
+
+    def _sleeves_to_asset_weights(self, sleeve_weights: dict[str, float]) -> np.ndarray:
+        snapshot = self._sub_agent_snapshot()
+        weights = np.zeros(self.n_assets, dtype=float)
+        for asset_class in ASSET_CLASSES:
+            start, end = self.class_ranges[asset_class]
+            class_signal = snapshot["risky_weights"][asset_class][self.current_step]
+            internal_weights = normalize_weights(class_signal)
+            weights[start:end] = sleeve_weights.get(asset_class, 0.0) * internal_weights
+        cash_index = self._cash_index()
+        if cash_index is not None:
+            weights[cash_index] = sleeve_weights.get(CASH_ASSET_CLASS, 0.0)
+        return normalize_weights(weights)
+
+    def _apply_action_controls(self, action: np.ndarray) -> tuple[np.ndarray, dict]:
+        sleeve_weights = self._apply_sleeve_constraints(action)
+        weights = self._sleeves_to_asset_weights(sleeve_weights)
+        caps = self._asset_weight_caps()
+        for _ in range(3):
+            weights = apply_class_guardrails(
+                weights,
+                class_ranges=self.class_ranges,
+                max_class_weights=_risk_class_caps(self.config, self.risk_appetite),
+                max_asset_weight=None,
+            )
+            weights = normalize_weights_with_caps(weights, caps)
+        return weights, {"sleeve_weights": sleeve_weights}
 
     def _observation(self) -> np.ndarray:
         sub_agent_weights = self._sub_agent_weights()
@@ -343,7 +600,7 @@ class SACMetaPortfolioEnv(gym.Env):
             cov_diag=self.cov_diag[self.current_step],
             prev_weights=self.prev_weights,
             sub_agent_weights=sub_agent_weights,
-            class_features=self._class_features(sub_agent_weights),
+            class_features=self._class_features(),
             micro_indicators=self.micro,
             macro_indicators=self.macro,
             regimes=self.regimes,
@@ -366,17 +623,15 @@ class SACMetaPortfolioEnv(gym.Env):
         )
         self.portfolio_value = 1.0
         self.peak_value = 1.0
-        self.prev_weights = self._sub_agent_weights()
+        self.prev_weights = np.asarray(self._sub_agent_weights(), dtype=float)
+        self.episode_log_return = 0.0
+        self.episode_agent_log_return = 0.0
+        self.concentration_history = []
         return self._observation(), {}
 
     def step(self, action):
         sub_agent_weights = self._sub_agent_weights()
-        weights = apply_class_guardrails(
-            action,
-            class_ranges=self.class_ranges,
-            max_class_weights=self.max_class_weights,
-            max_asset_weight=self.config.max_asset_weight,
-        )
+        weights, risk_adjustment = self._apply_action_controls(action)
         turnover = float(np.sum(np.abs(weights - self.prev_weights)))
         transaction_cost = turnover * self.config.transaction_fee
         asset_returns = (
@@ -396,6 +651,11 @@ class SACMetaPortfolioEnv(gym.Env):
         drawdown = 1.0 - (next_portfolio_value / max(next_peak, 1e-12))
         drawdown_worsening = max(drawdown - previous_drawdown, 0.0)
         downside_return = max(-portfolio_return, 0.0)
+        expected_daily_return = float(np.dot(weights, self.mu[self.current_step]))
+        expected_return_shortfall = max(
+            self.config.min_expected_daily_return - expected_daily_return,
+            0.0,
+        )
         target_volatility_penalty = 0.0
         if (
             self.config.target_daily_volatility is not None
@@ -404,15 +664,37 @@ class SACMetaPortfolioEnv(gym.Env):
             target_volatility_penalty = self.config.target_volatility_penalty_scale * abs(
                 portfolio_volatility - self.config.target_daily_volatility
             )
+        self.episode_log_return += float(np.log(net_return))
+        self.episode_agent_log_return += float(np.log(max(1.0 + agent_benchmark_return, 1e-6)))
+        self.concentration_history.append(concentration)
+        terminated = self.current_step + 1 >= self.end_step
+        concentration_target = _risk_concentration_target(self.n_assets, self.risk_appetite)
+        terminal_reward = 0.0
+        if terminated:
+            horizon_alpha = self.episode_log_return - self.episode_agent_log_return
+            average_concentration = (
+                float(np.mean(self.concentration_history))
+                if self.concentration_history
+                else concentration
+            )
+            terminal_reward = (
+                self.config.horizon_reward_scale * self.episode_log_return
+                + self.config.benchmark_reward_scale * horizon_alpha
+                - self.config.diversification_reward_scale
+                * max(average_concentration - concentration_target, 0.0)
+            )
+
         raw_reward = (
             float(np.log(net_return))
             + self.config.benchmark_reward_scale * (portfolio_return - agent_benchmark_return)
+            + terminal_reward
             - self.config.volatility_penalty_scale * portfolio_volatility
             - self.config.turnover_penalty * turnover
             - self.config.concentration_penalty_scale * concentration
             - self.config.downside_penalty_scale * downside_return
             - self.config.drawdown_penalty_scale * (drawdown + drawdown_worsening)
             - target_volatility_penalty
+            - self.config.cash_shortfall_penalty_scale * expected_return_shortfall
         )
         reward = self.config.reward_scale * raw_reward
 
@@ -420,7 +702,6 @@ class SACMetaPortfolioEnv(gym.Env):
         self.peak_value = next_peak
         self.prev_weights = weights
         self.current_step += 1
-        terminated = self.current_step >= self.end_step
         return self._observation(), float(reward), terminated, False, {
             "portfolio_value": float(self.portfolio_value),
             "portfolio_return": portfolio_return,
@@ -429,6 +710,13 @@ class SACMetaPortfolioEnv(gym.Env):
             "portfolio_volatility": portfolio_volatility,
             "turnover": turnover,
             "drawdown": drawdown,
+            "expected_daily_return": expected_daily_return,
+            "expected_return_shortfall": expected_return_shortfall,
+            "terminal_reward": terminal_reward,
+            "horizon_log_return": self.episode_log_return,
+            "horizon_agent_log_return": self.episode_agent_log_return,
+            "cash_overlay_applied": False,
+            "sleeve_weights": risk_adjustment["sleeve_weights"],
             "risk_appetite": self.risk_appetite,
             "crypto_weight": float(
                 weights[self.class_ranges["crypto"][0] : self.class_ranges["crypto"][1]].sum()
@@ -483,8 +771,9 @@ def train_meta_agent(
     artifact_root: Path,
     config: SACMetaTrainingConfig,
 ) -> SACMetaTrainingReport:
-    context = _build_context(artifact_root)
+    context = _build_context(artifact_root, config)
     train_context, eval_context = split_meta_context(context, config)
+    macro_scaler, train_context, eval_context = _fit_meta_macro_scaler(train_context, eval_context)
 
     def make_train_env():
         return Monitor(
@@ -554,20 +843,28 @@ def train_meta_agent(
         )
         shutil.copy2(model_path, backup_path)
     trained_model.save(model_path)
+    joblib.dump(macro_scaler, meta_dir / "meta_macro_scaler.pkl")
 
     obs_dim = meta_observation_dim(
         n_assets=context["prices"].shape[1],
         micro_dim=context["micro"].shape[1],
         macro_dim=context["macro"].shape[1],
+        class_feature_dim=META_CLASS_FEATURE_DIM,
     )
     metadata = {
         "algorithm": "sac",
         "policy_backend": "sb3",
         "model_file": "model.zip",
-        "feature_version": "sac-meta-v2-subagent-aware",
+        "feature_version": META_V3_FEATURE_VERSION,
         "policy_observation_dim": int(obs_dim),
         "inference_observation_dim": int(obs_dim),
-        "action_dim": int(context["prices"].shape[1]),
+        "action_dim": len(ASSET_CLASSES) + (1 if config.cash_enabled else 0),
+        "policy_action_layout": META_SLEEVE_ACTION_LAYOUT,
+        "policy_action_names": list(ASSET_CLASSES)
+        + ([CASH_ASSET_CLASS] if config.cash_enabled else []),
+        "class_feature_dim": META_CLASS_FEATURE_DIM,
+        "uses_shared_macro": True,
+        "meta_macro_feature_names": list(context["global_macro_feature_names"]),
         "class_order": list(ASSET_CLASSES),
         "class_ranges": {
             key: [int(value[0]), int(value[1])]
@@ -578,12 +875,37 @@ def train_meta_agent(
             "max_stock_weight": config.max_stock_weight,
             "max_crypto_weight": config.max_crypto_weight,
             "max_etf_weight": config.max_etf_weight,
+            "max_cash_weight": config.max_cash_weight,
+            "min_expected_daily_return": config.min_expected_daily_return,
+            "cash_shortfall_penalty_scale": config.cash_shortfall_penalty_scale,
+            "cash_enabled": config.cash_enabled,
+            "cash_annual_return": config.cash_annual_return,
             "hard_min_stock_weight_removed": True,
+        },
+        "meta_architecture": {
+            "sub_agent_cash_aware": True,
+            "shared_global_macro": True,
+            "meta_action_layout": META_SLEEVE_ACTION_LAYOUT,
+            "class_feature_layout": [
+                "class_expected_return",
+                "class_volatility",
+                "class_previous_weight",
+                "class_cash_weight",
+            ],
+            "sub_agent_signal_layout": "per-class risky weights scaled by class count plus mean cash prior",
         },
         "sac_training_config": asdict(config),
         "sac_retrained_at": datetime.now(UTC).isoformat(),
         "train_rows": int(train_context["prices"].shape[0]),
         "eval_rows": int(eval_context["prices"].shape[0]),
+        "train_date_range": {
+            "start": str(train_context["dates"][0]),
+            "end": str(train_context["dates"][-1]),
+        },
+        "eval_date_range": {
+            "start": str(eval_context["dates"][0]),
+            "end": str(eval_context["dates"][-1]),
+        },
         **evaluation,
     }
     _save_json(meta_dir / "metadata.json", metadata)

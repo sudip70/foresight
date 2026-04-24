@@ -42,9 +42,14 @@ def build_parser() -> ArgumentParser:
     parser.add_argument("--drawdown-penalty-scale", type=float, default=0.02)
     parser.add_argument("--downside-penalty-scale", type=float, default=0.25)
     parser.add_argument("--benchmark-reward-scale", type=float, default=0.25)
+    parser.add_argument("--horizon-reward-scale", type=float, default=1.0)
+    parser.add_argument("--diversification-reward-scale", type=float, default=0.10)
     parser.add_argument("--target-daily-volatility", type=float)
     parser.add_argument("--target-volatility-penalty-scale", type=float, default=0.0)
     parser.add_argument("--max-asset-weight", type=float)
+    parser.add_argument("--max-cash-weight", type=float, default=0.95)
+    parser.add_argument("--no-cash-sleeve", action="store_true")
+    parser.add_argument("--cash-annual-return", type=float, default=0.04)
     parser.add_argument("--reward-scale", type=float, default=100.0)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument(
@@ -110,9 +115,14 @@ def main() -> None:
         drawdown_penalty_scale=args.drawdown_penalty_scale,
         downside_penalty_scale=args.downside_penalty_scale,
         benchmark_reward_scale=args.benchmark_reward_scale,
+        horizon_reward_scale=args.horizon_reward_scale,
+        diversification_reward_scale=args.diversification_reward_scale,
         target_daily_volatility=args.target_daily_volatility,
         target_volatility_penalty_scale=args.target_volatility_penalty_scale,
         max_asset_weight=args.max_asset_weight,
+        max_cash_weight=args.max_cash_weight,
+        cash_enabled=not args.no_cash_sleeve,
+        cash_annual_return=args.cash_annual_return,
         reward_scale=args.reward_scale,
         learning_rate=args.learning_rate,
         learning_rate_schedule=args.learning_rate_schedule,

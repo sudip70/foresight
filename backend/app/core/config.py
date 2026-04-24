@@ -23,6 +23,10 @@ class Settings:
     meta_max_stock_weight: float
     meta_max_crypto_weight: float
     meta_max_etf_weight: float
+    meta_max_cash_weight: float
+    meta_min_expected_daily_return: float
+    meta_cash_enabled: bool
+    meta_cash_annual_return: float
 
 
 @lru_cache(maxsize=1)
@@ -46,4 +50,11 @@ def get_settings() -> Settings:
         meta_max_stock_weight=float(os.getenv("STOCKIFY_META_MAX_STOCK_WEIGHT", "0.85")),
         meta_max_crypto_weight=float(os.getenv("STOCKIFY_META_MAX_CRYPTO_WEIGHT", "0.30")),
         meta_max_etf_weight=float(os.getenv("STOCKIFY_META_MAX_ETF_WEIGHT", "0.70")),
+        meta_max_cash_weight=float(os.getenv("STOCKIFY_META_MAX_CASH_WEIGHT", "0.95")),
+        meta_min_expected_daily_return=float(
+            os.getenv("STOCKIFY_META_MIN_EXPECTED_DAILY_RETURN", "0.0")
+        ),
+        meta_cash_enabled=os.getenv("STOCKIFY_META_CASH_ENABLED", "true").lower()
+        in {"1", "true", "yes", "on"},
+        meta_cash_annual_return=float(os.getenv("STOCKIFY_META_CASH_ANNUAL_RETURN", "0.04")),
     )

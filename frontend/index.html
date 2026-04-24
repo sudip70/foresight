@@ -5,15 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Stockify</title>
     <link rel="stylesheet" href="./styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   </head>
   <body>
     <header class="hero">
       <div>
-        <p class="eyebrow">RL Allocation + Explainability</p>
+        <p class="eyebrow">Market Intelligence + Portfolio Simulation</p>
         <h1>Stockify</h1>
         <p class="lede">
-          A split web app for portfolio allocation, surrogate-SHAP explanations,
-          and deterministic backtests.
+          Ticker-level bear, base, and bull scenarios with risk-aware portfolio simulation.
         </p>
       </div>
       <div class="endpoint-card">
@@ -31,79 +31,151 @@
           <input id="amount" type="number" min="1000" value="10000" step="500" />
         </div>
         <div class="field-group">
-          <label for="risk">Risk appetite</label>
+          <label for="risk">
+            Risk appetite
+            <span class="term" title="Higher risk allows more downside and volatility in pursuit of higher upside.">?</span>
+          </label>
           <input id="risk" type="range" min="0" max="1" step="0.01" value="0.5" />
           <span id="riskValue">0.50</span>
         </div>
         <div class="field-group">
-          <label for="duration">Projection horizon (days)</label>
-          <input id="duration" type="number" min="1" value="30" step="1" />
+          <label for="horizon">
+            Forecast horizon
+            <span class="term" title="The number of calendar days used for bear, base, and bull scenario estimates.">?</span>
+          </label>
+          <input id="horizon" type="number" min="1" value="300" step="1" />
         </div>
-        <div class="field-group">
-          <label for="windowSize">Window size</label>
-          <input id="windowSize" type="number" min="2" value="60" step="1" />
-        </div>
+        <details class="advanced">
+          <summary>Advanced</summary>
+          <div class="field-group">
+            <label for="windowSize">Estimator window</label>
+            <input id="windowSize" type="number" min="2" value="60" step="1" />
+          </div>
+        </details>
         <div class="field-group action-row">
-          <button id="runInference">Run allocation</button>
-          <button id="runExplanations">Explain allocation</button>
-          <button id="runBacktest">Run backtest</button>
+          <button id="refreshDashboard">Refresh dashboard</button>
         </div>
       </section>
 
-      <section class="tabs">
-        <button class="tab is-active" data-tab="allocation">Allocation</button>
-        <button class="tab" data-tab="explain">Explanations</button>
-        <button class="tab" data-tab="diagnostics">Diagnostics</button>
-      </section>
+      <nav class="tabs" aria-label="Dashboard sections">
+        <button class="tab is-active" data-tab="market">Market Overview</button>
+        <button class="tab" data-tab="forecast">Ticker Forecast</button>
+        <button class="tab" data-tab="simulator">Portfolio Simulator</button>
+      </nav>
 
-      <section id="allocation" class="panel view is-active">
+      <section id="market" class="panel view is-active">
+        <div class="section-head">
+          <div>
+            <h2>Market Overview</h2>
+            <p class="muted">Ranked scenarios across the current stock, crypto, and ETF universe.</p>
+          </div>
+        </div>
+        <div id="marketHighlights" class="metric-grid"></div>
         <div class="grid two">
-          <article class="card">
-            <h2>Summary</h2>
-            <div id="summaryCards" class="summary-grid"></div>
-          </article>
-          <article class="card">
-            <h2>Current Macro Snapshot</h2>
+          <article class="surface">
+            <h3>Macro Snapshot</h3>
             <div id="macroSnapshot" class="stack"></div>
           </article>
+          <article class="surface">
+            <h3>Opportunity Ranking</h3>
+            <div id="marketTable" class="table wide-table"></div>
+          </article>
         </div>
-        <article class="card">
-          <h2>Class Allocations</h2>
-          <div id="classAllocations"></div>
-        </article>
-        <article class="card">
-          <h2>Asset Allocations</h2>
-          <div id="assetAllocations"></div>
-        </article>
       </section>
 
-      <section id="explain" class="panel view">
-        <article class="card">
-          <h2>Surrogate SHAP Targets</h2>
-          <div id="explanationCards" class="stack"></div>
-        </article>
+      <section id="forecast" class="panel view">
+        <div class="section-head">
+          <div>
+            <h2>Ticker Forecast</h2>
+            <p class="muted">Historical price plus bear, base, and bull scenario paths.</p>
+          </div>
+          <div class="ticker-actions">
+            <label for="tickerSelect">Ticker</label>
+            <select id="tickerSelect"></select>
+            <button id="runTickerForecast">Run forecast</button>
+          </div>
+        </div>
+        <div class="forecast-layout">
+          <article class="surface chart-surface">
+            <canvas id="forecastChart" aria-label="Ticker forecast chart"></canvas>
+            <div id="chartFallback" class="muted"></div>
+          </article>
+          <article class="surface">
+            <h3>Scenario Metrics</h3>
+            <div id="tickerMetrics" class="metric-grid compact"></div>
+            <div id="tickerNarrative" class="narrative"></div>
+          </article>
+        </div>
       </section>
 
-      <section id="diagnostics" class="panel view">
+      <section id="simulator" class="panel view">
+        <div class="section-head">
+          <div>
+            <h2>Portfolio Simulator</h2>
+            <p class="muted">Forecast-ranked suggestions with bear, base, and bull portfolio values.</p>
+          </div>
+          <button id="runSimulation">Run simulation</button>
+        </div>
         <div class="grid two">
-          <article class="card">
-            <h2>Backend Health</h2>
+          <article class="surface">
+            <h3>Optional Ticker Selection</h3>
+            <select id="simulationTickers" multiple size="8"></select>
+            <p class="muted">Leave blank to let Stockify use the top-ranked forecast opportunities.</p>
+          </article>
+          <article class="surface">
+            <h3>Portfolio Scenario</h3>
+            <div id="simulationSummary" class="metric-grid compact"></div>
+            <div id="simulationWarnings" class="stack"></div>
+          </article>
+        </div>
+        <div class="grid two">
+          <article class="surface">
+            <h3>Class Allocation</h3>
+            <div id="simulationClasses" class="table"></div>
+          </article>
+          <article class="surface">
+            <h3>Asset Allocation</h3>
+            <div id="simulationAssets" class="table"></div>
+          </article>
+        </div>
+        <article class="surface">
+          <h3>Trade Plan</h3>
+          <div id="simulationTrades" class="table wide-table"></div>
+        </article>
+        <details class="advanced-diagnostics">
+          <summary>Compare existing RL allocation and diagnostics</summary>
+          <div class="diagnostic-actions">
+            <button id="runRlAllocation">Run RL allocation snapshot</button>
+            <button id="runBacktest">Run RL backtest</button>
+          </div>
+          <div class="grid two">
+            <article class="surface">
+              <h3>RL Allocation Summary</h3>
+              <div id="rlSummary" class="metric-grid compact"></div>
+              <div id="rlClasses" class="table"></div>
+            </article>
+            <article class="surface">
+              <h3>Backtest Metrics</h3>
+              <div id="backtestSummary" class="metric-grid compact"></div>
+              <div id="backtestWarnings" class="stack"></div>
+            </article>
+          </div>
+        </details>
+      </section>
+
+      <details class="diagnostics">
+        <summary>Backend diagnostics</summary>
+        <div class="grid two">
+          <article class="surface">
+            <h3>Backend Health</h3>
             <pre id="healthBlock" class="json-block"></pre>
           </article>
-          <article class="card">
-            <h2>Model Metadata</h2>
+          <article class="surface">
+            <h3>Model Metadata</h3>
             <pre id="modelsBlock" class="json-block"></pre>
           </article>
         </div>
-        <article class="card">
-          <h2>Backtest Metrics</h2>
-          <div id="backtestSummary" class="summary-grid"></div>
-        </article>
-        <article class="card">
-          <h2>Equity Curve</h2>
-          <div id="equityCurve"></div>
-        </article>
-      </section>
+      </details>
     </main>
 
     <script src="./app.js" type="module"></script>

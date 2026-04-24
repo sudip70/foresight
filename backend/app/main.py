@@ -11,7 +11,14 @@ from backend.app.api.schemas import (
     HealthResponse,
     InferenceRequest,
     InferenceResponse,
+    MarketForecastRequest,
+    MarketForecastResponse,
     ModelsResponse,
+    PortfolioSimulationRequest,
+    PortfolioSimulationResponse,
+    TickerForecastRequest,
+    TickerForecastResponse,
+    UniverseResponse,
 )
 from backend.app.core.config import get_settings
 from backend.app.ml.artifacts import ArtifactValidationError
@@ -33,6 +40,10 @@ def _load_engine(strict_validation: bool):
         settings.meta_max_stock_weight,
         settings.meta_max_crypto_weight,
         settings.meta_max_etf_weight,
+        settings.meta_max_cash_weight,
+        settings.meta_min_expected_daily_return,
+        settings.meta_cash_enabled,
+        settings.meta_cash_annual_return,
     )
 
 
@@ -67,6 +78,64 @@ def create_app() -> FastAPI:
         except Exception as exc:  # pragma: no cover - defensive
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    @app.get(f"{settings.api_prefix}/universe", response_model=UniverseResponse)
+    def universe():
+        try:
+            engine = _load_engine(False)
+            return engine.universe_payload()
+        except ArtifactValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - defensive
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post(f"{settings.api_prefix}/forecasts/ticker", response_model=TickerForecastResponse)
+    def ticker_forecast(request: TickerForecastRequest):
+        try:
+            engine = _load_engine(request.strict_validation)
+            return engine.run_ticker_forecast(
+                ticker=request.ticker,
+                horizon_days=request.horizon_days,
+                window_size=request.window_size,
+            )
+        except ArtifactValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - defensive
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post(f"{settings.api_prefix}/forecasts/market", response_model=MarketForecastResponse)
+    def market_forecast(request: MarketForecastRequest):
+        try:
+            engine = _load_engine(request.strict_validation)
+            return engine.run_market_forecast(
+                horizon_days=request.horizon_days,
+                risk=request.risk,
+                top_n=request.top_n,
+                window_size=request.window_size,
+            )
+        except ArtifactValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - defensive
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post(
+        f"{settings.api_prefix}/portfolio/simulations",
+        response_model=PortfolioSimulationResponse,
+    )
+    def portfolio_simulation(request: PortfolioSimulationRequest):
+        try:
+            engine = _load_engine(request.strict_validation)
+            return engine.run_portfolio_simulation(
+                amount=request.amount,
+                risk=request.risk,
+                horizon_days=request.horizon_days,
+                selected_tickers=request.selected_tickers,
+                window_size=request.window_size,
+            )
+        except ArtifactValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - defensive
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     @app.post(f"{settings.api_prefix}/inference", response_model=InferenceResponse)
     def inference(request: InferenceRequest):
         try:
@@ -86,6 +155,7 @@ def create_app() -> FastAPI:
                 "sub_agent_allocations": result.sub_agent_allocations,
                 "latest_snapshot": result.latest_snapshot,
                 "top_asset_targets": result.top_asset_targets,
+                "trade_log": result.trade_log,
             }
         except ArtifactValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

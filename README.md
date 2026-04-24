@@ -2,6 +2,8 @@
 
 Stockify is a split web application for RL-driven portfolio allocation and model explainability.
 
+The live inference stack now uses a horizon-based hybrid allocator: learned PPO/SAC artifacts are still loaded, weak policies are blended with deterministic signal experts, and a final sleeve allocator balances projected horizon return against diversification, concentration, class caps, and risk-based cash limits.
+
 Phase 1 replaces the legacy Streamlit prototype with:
 
 - a Python backend built with FastAPI
@@ -25,6 +27,8 @@ Phase 1 runtime supports:
 - health and dependency checks
 - model and artifact metadata
 - allocation inference
+- projected portfolio value, profit, and upside/downside ranges for the selected horizon
+- trade logs for initial allocations and backtest rebalances
 - surrogate-SHAP explainability
 - deterministic historical backtests
 
@@ -104,10 +108,16 @@ This script:
 
 - splits each asset bundle chronologically into train and evaluation segments
 - trains a PPO policy against the cleaned observation layout used by the backend
+- rewards horizon portfolio growth, benchmark alpha, and diversification instead of only next-day return
+- applies risk-based cash caps so cash remains a sleeve rather than a default escape allocation
 - backs up the existing `model.zip` before replacing it
 - writes `training_summary.json` and updates bundle metadata with evaluation metrics
 
 The SAC meta-agent should be retrained only after the PPO sub-agents have been refreshed and validated.
+
+The rebuilt SAC meta-agent action space is sleeve-level: stock, crypto, ETF, and optional cash. It learns how much capital to assign to each sub-agent, while the sub-agents choose the assets inside each sleeve.
+
+Even when trained artifacts are present, the backend now applies signal-based fallback logic for underperforming agents, mixes the stock/crypto/ETF agent consensus into the SAC meta-agent output, and then rebalances that allocation through a horizon/diversification layer. Cash is capped by risk appetite, so it can act as a risk tool without becoming the default allocation for balanced users.
 
 ## Tests
 

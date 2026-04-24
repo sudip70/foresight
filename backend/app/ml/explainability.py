@@ -116,9 +116,21 @@ def build_explanations(
             window_size=window_size,
             prev_weights=None,
         )
-        weights = engine._apply_risk_adjustments(
-            engine.runtime.meta.policy.predict(scenario["meta_observation"]),
+        raw_weights, _ = engine._predict_mixed_policy_weights(
+            scenario,
+            risk=risk,
+            duration=duration,
+        )
+        weights, _ = engine._apply_risk_adjustments(
+            raw_weights,
             risk,
+            mu_all=scenario["mu_all"],
+            cov_diag=np.diag(scenario["cov_all"]),
+            cash_prior=(
+                None
+                if engine._cash_index() is None
+                else float(scenario["sub_agent_weights"][engine._cash_index()])
+            ),
         )
         X.append(scenario["meta_observation"])
         class_ranges = engine._class_ranges()
@@ -199,4 +211,3 @@ def build_explanations(
         )
 
     return explanations
-

@@ -63,7 +63,8 @@ def build_fixture_artifact_tree(tmp_path: Path, *, rows: int = 24) -> Path:
         },
     }
 
-    total_assets = sum(len(spec["tickers"]) for spec in asset_specs.values())
+    risky_assets = sum(len(spec["tickers"]) for spec in asset_specs.values())
+    total_assets = risky_assets + 1
     per_asset_obs_dim = single_agent_observation_dim(
         n_assets=len(next(iter(asset_specs.values()))["tickers"]),
         micro_dim=4,
@@ -111,12 +112,13 @@ def build_fixture_artifact_tree(tmp_path: Path, *, rows: int = 24) -> Path:
     meta_dir = artifact_root / "meta"
     meta_dir.mkdir(parents=True, exist_ok=True)
     weights_matrix = np.zeros((total_assets, meta_obs_dim), dtype=float)
-    for index in range(total_assets):
+    for index in range(risky_assets):
         weights_matrix[index, index] = 1.2
         weights_matrix[index, total_assets * 2 + index] = 0.35
         weights_matrix[index, total_assets * 3 + index] = 0.20
         weights_matrix[index, (total_assets * 4) + 11 + (index % combined_micro_dim)] = 0.08
-    bias = np.linspace(0.1, 0.6, total_assets)
+    weights_matrix[-1, total_assets * 3 + risky_assets] = 0.8
+    bias = np.linspace(0.1, 0.7, total_assets)
     _write_json(
         meta_dir / "model.json",
         {
@@ -132,6 +134,127 @@ def build_fixture_artifact_tree(tmp_path: Path, *, rows: int = 24) -> Path:
             "policy_backend": "linear",
             "algorithm": "sac",
             "model_file": "model.json",
+        },
+    )
+
+    return artifact_root
+
+
+def build_v3_fixture_artifact_tree(tmp_path: Path, *, rows: int = 36) -> Path:
+    artifact_root = tmp_path / "processed_v3"
+    macro_names = ["vix_market_volatility", "federal_funds_rate"]
+    shared_macro = _asset_macro(rows, 0.0)
+
+    asset_specs = {
+        "stock": {
+            "tickers": ["AAPL", "MSFT"],
+            "weights": [0.68, 0.20, 0.12],
+            "offset": 0.0,
+        },
+        "crypto": {
+            "tickers": ["BTC-USD", "ETH-USD"],
+            "weights": [0.22, 0.43, 0.35],
+            "offset": 4.0,
+        },
+        "etf": {
+            "tickers": ["SPY", "QQQ"],
+            "weights": [0.40, 0.42, 0.18],
+            "offset": 8.0,
+        },
+    }
+
+    risky_assets = sum(len(spec["tickers"]) for spec in asset_specs.values())
+    total_assets = risky_assets + 1
+    per_asset_obs_dim = single_agent_observation_dim(
+        n_assets=3,
+        micro_dim=4,
+        macro_dim=2,
+    )
+    combined_micro_dim = 4 * len(asset_specs)
+    meta_obs_dim = meta_observation_dim(
+        n_assets=total_assets,
+        micro_dim=combined_micro_dim,
+        macro_dim=2,
+        class_feature_dim=12,
+    )
+    dates = np.arange(
+        np.datetime64("2025-01-01"),
+        np.datetime64("2025-01-01") + rows,
+        dtype="datetime64[D]",
+    )
+
+    for asset_class, spec in asset_specs.items():
+        asset_dir = artifact_root / asset_class
+        asset_dir.mkdir(parents=True, exist_ok=True)
+        np.save(asset_dir / "prices.npy", _asset_prices(rows, spec["offset"]))
+        np.save(asset_dir / "dates.npy", dates)
+        np.save(asset_dir / "regimes.npy", (np.arange(rows) + int(spec["offset"])) % 3)
+        np.save(asset_dir / "micro_indicators.npy", _asset_micro(rows, spec["offset"]))
+        np.save(asset_dir / "macro_indicators.npy", shared_macro)
+        np.save(asset_dir / "macro_indicators_raw.npy", shared_macro)
+        (asset_dir / "tickers.json").write_text(json.dumps(spec["tickers"]))
+        _write_json(
+            asset_dir / "model.json",
+            {"weights": spec["weights"], "observation_dim": per_asset_obs_dim},
+        )
+        _write_json(
+            asset_dir / "metadata.json",
+            {
+                "asset_class": asset_class,
+                "feature_version": "ohlcv-stationary-v4-cash-sleeve",
+                "policy_backend": "fixed",
+                "algorithm": "ppo",
+                "model_file": "model.json",
+                "macro_feature_names": macro_names,
+                "action_dim": 3,
+                "ppo_training_config": {
+                    "cash_enabled": True,
+                    "max_asset_weight": 0.85,
+                    "max_cash_weight": 0.95,
+                    "cash_annual_return": 0.04,
+                },
+            },
+        )
+
+    meta_dir = artifact_root / "meta"
+    meta_dir.mkdir(parents=True, exist_ok=True)
+    weights_matrix = np.zeros((total_assets, meta_obs_dim), dtype=float)
+    sub_agent_offset = total_assets * 3
+    class_context_offset = total_assets * 4
+    portfolio_state_offset = class_context_offset + 12
+    micro_offset = portfolio_state_offset + 2
+    macro_offset = micro_offset + combined_micro_dim
+    cash_index = total_assets - 1
+    for index in range(risky_assets):
+        weights_matrix[index, index] = 0.8
+        weights_matrix[index, sub_agent_offset + index] = 1.1
+        weights_matrix[index, total_assets * 2 + index] = 0.15
+        weights_matrix[index, micro_offset + (index % combined_micro_dim)] = 0.05
+    weights_matrix[cash_index, cash_index] = 0.4
+    weights_matrix[cash_index, sub_agent_offset + cash_index] = 1.4
+    weights_matrix[cash_index, class_context_offset + 3] = 0.3
+    weights_matrix[cash_index, class_context_offset + 7] = 0.3
+    weights_matrix[cash_index, class_context_offset + 11] = 0.3
+    weights_matrix[cash_index, macro_offset] = 0.05
+    bias = np.linspace(0.1, 0.5, total_assets)
+    _write_json(
+        meta_dir / "model.json",
+        {
+            "weights_matrix": weights_matrix.tolist(),
+            "bias": bias.tolist(),
+            "observation_dim": meta_obs_dim,
+        },
+    )
+    _write_json(
+        meta_dir / "metadata.json",
+        {
+            "feature_version": "sac-meta-v3-globalmacro-cashaware",
+            "policy_backend": "linear",
+            "algorithm": "sac",
+            "model_file": "model.json",
+            "class_feature_dim": 12,
+            "uses_shared_macro": True,
+            "meta_macro_feature_names": macro_names,
         },
     )
 

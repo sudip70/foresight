@@ -44,6 +44,7 @@ class AssetArtifacts:
     regimes: np.ndarray
     micro_indicators: np.ndarray
     macro_indicators: np.ndarray
+    macro_indicators_raw: np.ndarray
     indicator_scaler: object | None
     macro_scaler: object | None
     policy: object
@@ -56,10 +57,17 @@ class MetaArtifacts:
     policy: object
     metadata: dict
     model_path: Path
+    macro_scaler: object | None
 
 
 def _read_json(path: Path) -> dict:
     return json.loads(path.read_text())
+
+
+def _read_optional_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return _read_json(path)
 
 
 def _load_optional_pickle(path: Path):
@@ -78,6 +86,28 @@ def _synthetic_ohlcv_from_prices(prices: np.ndarray) -> np.ndarray:
     ohlcv[:, :, 3] = prices
     ohlcv[:, :, 4] = 1.0
     return ohlcv
+
+
+def _append_cash_sleeve_to_market_data(
+    prices: np.ndarray,
+    ohlcv: np.ndarray,
+    *,
+    cash_annual_return: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    daily_return = (1.0 + float(cash_annual_return)) ** (1.0 / 252.0) - 1.0
+    cash_prices = np.cumprod(
+        np.full(np.asarray(prices).shape[0], 1.0 + daily_return, dtype=float)
+    ).reshape(-1, 1)
+    cash_ohlcv = np.zeros((cash_prices.shape[0], 1, 5), dtype=float)
+    cash_ohlcv[:, 0, 0] = cash_prices[:, 0]
+    cash_ohlcv[:, 0, 1] = cash_prices[:, 0]
+    cash_ohlcv[:, 0, 2] = cash_prices[:, 0]
+    cash_ohlcv[:, 0, 3] = cash_prices[:, 0]
+    cash_ohlcv[:, 0, 4] = 1.0
+    return np.hstack([np.asarray(prices, dtype=float), cash_prices]), np.concatenate(
+        [np.asarray(ohlcv, dtype=float), cash_ohlcv],
+        axis=1,
+    )
 
 
 def _default_dates(row_count: int) -> np.ndarray:
@@ -259,6 +289,12 @@ def load_asset_artifacts(root: Path, asset_class: str, *, strict: bool) -> Asset
     regimes = np.load(asset_dir / "regimes.npy")
     micro_indicators = np.load(asset_dir / "micro_indicators.npy")
     macro_indicators = np.load(asset_dir / "macro_indicators.npy")
+    macro_indicators_raw_path = asset_dir / "macro_indicators_raw.npy"
+    macro_indicators_raw = (
+        np.load(macro_indicators_raw_path)
+        if macro_indicators_raw_path.exists()
+        else np.asarray(macro_indicators, dtype=float)
+    )
 
     (
         dates,
@@ -279,22 +315,38 @@ def load_asset_artifacts(root: Path, asset_class: str, *, strict: bool) -> Asset
         strict=strict,
     )
 
+    feature_names = _read_optional_json(asset_dir / "feature_names.json")
+    raw_macro_feature_names = feature_names.get(
+        "macro_raw",
+        feature_names.get("macro", metadata.get("macro_feature_names", DEFAULT_MACRO_NAMES)),
+    )
+    training_config = metadata.get("ppo_training_config", {})
+    action_dim = int(metadata.get("action_dim", len(tickers)))
+    cash_enabled = bool(training_config.get("cash_enabled")) or action_dim > len(tickers)
+    if cash_enabled and action_dim <= len(tickers):
+        action_dim = len(tickers) + 1
+    if cash_enabled:
+        prices, ohlcv = _append_cash_sleeve_to_market_data(
+            prices,
+            ohlcv,
+            cash_annual_return=float(training_config.get("cash_annual_return", 0.04)),
+        )
+
     inference_observation_dim = single_agent_observation_dim(
-        n_assets=len(tickers),
+        n_assets=action_dim,
         micro_dim=int(micro_indicators.shape[1]),
         macro_dim=int(macro_indicators.shape[1]),
     )
     legacy_observation_dim = (
-        len(tickers) + 2 + 3 + int(micro_indicators.shape[1]) + int(macro_indicators.shape[1])
+        action_dim + 2 + 3 + int(micro_indicators.shape[1]) + int(macro_indicators.shape[1])
     )
     ohlcv_v2_observation_dim = (
-        (len(tickers) * 8)
+        (action_dim * 8)
         + 2
         + 3
         + int(micro_indicators.shape[1])
         + int(macro_indicators.shape[1])
     )
-    action_dim = len(tickers)
     model_file = metadata.get("model_file", "model.zip")
     policy, policy_observation_dim = _load_asset_policy(
         asset_dir / model_file,
@@ -308,6 +360,8 @@ def load_asset_artifacts(root: Path, asset_class: str, *, strict: bool) -> Asset
     metadata["ticker_count"] = len(tickers)
     metadata["micro_feature_count"] = int(micro_indicators.shape[1])
     metadata["macro_feature_count"] = int(macro_indicators.shape[1])
+    metadata["raw_macro_feature_names"] = raw_macro_feature_names
+    metadata["cash_enabled"] = cash_enabled
     metadata["inference_observation_dim"] = inference_observation_dim
     metadata["policy_observation_dim"] = policy_observation_dim
     metadata["action_dim"] = action_dim
@@ -321,6 +375,7 @@ def load_asset_artifacts(root: Path, asset_class: str, *, strict: bool) -> Asset
         regimes=regimes,
         micro_indicators=micro_indicators,
         macro_indicators=macro_indicators,
+        macro_indicators_raw=macro_indicators_raw[-alignment.aligned_rows:],
         indicator_scaler=_load_optional_pickle(asset_dir / "indicator_scaler.pkl"),
         macro_scaler=_load_optional_pickle(asset_dir / "macro_scaler.pkl"),
         policy=policy,
@@ -378,4 +433,18 @@ def load_meta_artifacts(
         if last_error is not None:
             raise last_error
         raise ArtifactValidationError(f"Unable to load meta policy at {model_path}")
-    return MetaArtifacts(policy=policy, metadata=metadata, model_path=model_path)
+    return MetaArtifacts(
+        policy=policy,
+        metadata=metadata,
+        model_path=model_path,
+        macro_scaler=_load_optional_pickle(meta_dir / "meta_macro_scaler.pkl"),
+    )
+
+
+def peek_meta_metadata(root: Path) -> dict:
+    meta_dir = root / "meta"
+    metadata = _default_meta_metadata()
+    metadata_path = meta_dir / "metadata.json"
+    if metadata_path.exists():
+        metadata.update(_read_json(metadata_path))
+    return metadata
