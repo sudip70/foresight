@@ -18,7 +18,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from backend.app.ml.envs import build_single_agent_observation, single_agent_observation_dim
-from backend.app.ml.policies import normalize_weights
+from backend.app.ml.policies import normalize_action_with_cash_sleeve
 
 
 @dataclass(frozen=True)
@@ -37,9 +37,14 @@ class PPOTrainingConfig:
     drawdown_penalty_scale: float = 0.02
     downside_penalty_scale: float = 0.25
     benchmark_reward_scale: float = 0.25
+    horizon_reward_scale: float = 1.0
+    diversification_reward_scale: float = 0.10
     target_daily_volatility: float | None = None
     target_volatility_penalty_scale: float = 0.0
     max_asset_weight: float | None = None
+    max_cash_weight: float | None = 0.95
+    cash_enabled: bool = True
+    cash_annual_return: float = 0.04
     reward_scale: float = 100.0
     learning_rate: float = 3e-4
     learning_rate_schedule: str = "constant"
@@ -97,6 +102,47 @@ class FeaturePreparationReport:
     macro_selected_count: int
     micro_dropped_indices: list[int]
     macro_dropped_indices: list[int]
+
+
+def _cash_daily_return(config: PPOTrainingConfig) -> float:
+    return (1.0 + float(config.cash_annual_return)) ** (1.0 / 252.0) - 1.0
+
+
+def _risk_cash_cap(risk: float, *, configured_max: float | None) -> float | None:
+    if configured_max is None:
+        return None
+    risk_value = float(np.clip(risk, 0.0, 1.0))
+    dynamic_cap = 0.08 + ((1.0 - risk_value) * 0.42)
+    return float(min(float(configured_max), dynamic_cap))
+
+
+def _risk_concentration_target(n_assets: int, risk: float) -> float:
+    risk_value = float(np.clip(risk, 0.0, 1.0))
+    equal_concentration = 1.0 / max(int(n_assets), 1)
+    return equal_concentration + (risk_value * (0.45 - equal_concentration))
+
+
+def _append_cash_sleeve_arrays(
+    prices: np.ndarray,
+    ohlcv: np.ndarray,
+    *,
+    config: PPOTrainingConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    if not config.cash_enabled:
+        return np.asarray(prices, dtype=float), np.asarray(ohlcv, dtype=float)
+
+    base_prices = np.asarray(prices, dtype=float)
+    base_ohlcv = np.asarray(ohlcv, dtype=float)
+    cash_prices = np.cumprod(
+        np.full(base_prices.shape[0], 1.0 + _cash_daily_return(config), dtype=float)
+    ).reshape(-1, 1)
+    cash_ohlcv = np.zeros((base_prices.shape[0], 1, 5), dtype=float)
+    cash_ohlcv[:, 0, 0] = cash_prices[:, 0]
+    cash_ohlcv[:, 0, 1] = cash_prices[:, 0]
+    cash_ohlcv[:, 0, 2] = cash_prices[:, 0]
+    cash_ohlcv[:, 0, 3] = cash_prices[:, 0]
+    cash_ohlcv[:, 0, 4] = 1.0
+    return np.hstack([base_prices, cash_prices]), np.concatenate([base_ohlcv, cash_ohlcv], axis=1)
 
 
 def _load_json(path: Path, fallback: dict | None = None) -> dict:
@@ -333,12 +379,16 @@ class PPOPortfolioEnv(gym.Env):
         drawdown_penalty_scale: float,
         downside_penalty_scale: float = 0.25,
         benchmark_reward_scale: float = 0.25,
+        horizon_reward_scale: float = 1.0,
+        diversification_reward_scale: float = 0.10,
         target_daily_volatility: float | None = None,
         target_volatility_penalty_scale: float = 0.0,
         max_asset_weight: float | None = None,
+        max_cash_weight: float | None = None,
         reward_scale: float = 100.0,
         random_start: bool = True,
         fixed_risk: float | None = None,
+        risky_asset_count: int | None = None,
     ) -> None:
         super().__init__()
         self.prices = np.asarray(prices, dtype=float)
@@ -357,16 +407,20 @@ class PPOPortfolioEnv(gym.Env):
         self.drawdown_penalty_scale = float(drawdown_penalty_scale)
         self.downside_penalty_scale = float(downside_penalty_scale)
         self.benchmark_reward_scale = float(benchmark_reward_scale)
+        self.horizon_reward_scale = float(horizon_reward_scale)
+        self.diversification_reward_scale = float(diversification_reward_scale)
         self.target_daily_volatility = (
             None if target_daily_volatility is None else float(target_daily_volatility)
         )
         self.target_volatility_penalty_scale = float(target_volatility_penalty_scale)
         self.max_asset_weight = None if max_asset_weight is None else float(max_asset_weight)
+        self.max_cash_weight = None if max_cash_weight is None else float(max_cash_weight)
         self.reward_scale = float(reward_scale)
         self.random_start = bool(random_start)
         self.fixed_risk = None if fixed_risk is None else float(fixed_risk)
         self.num_regimes = 3
         self.n_assets = int(self.prices.shape[1])
+        self.risky_asset_count = int(risky_asset_count or self.n_assets)
         self.max_start = self.prices.shape[0] - self.window_size - self.episode_length - 2
         if self.max_start < self.window_size:
             raise ValueError(
@@ -394,6 +448,9 @@ class PPOPortfolioEnv(gym.Env):
         self.peak_value = 1.0
         self.asset_weights = np.ones(self.n_assets, dtype=float) / self.n_assets
         self.risk_appetite = 0.5
+        self.episode_log_return = 0.0
+        self.episode_benchmark_log_return = 0.0
+        self.concentration_history: list[float] = []
 
     def _sample_start(self) -> int:
         if not self.random_start:
@@ -444,13 +501,29 @@ class PPOPortfolioEnv(gym.Env):
         self.peak_value = 1.0
         self.asset_weights = np.ones(self.n_assets, dtype=float) / self.n_assets
         self.risk_appetite = self._sample_risk()
+        self.episode_log_return = 0.0
+        self.episode_benchmark_log_return = 0.0
+        self.concentration_history = []
         return self._observation(), {}
 
-    def step(self, action):
-        weights = normalize_weights(
-            np.asarray(action, dtype=float),
-            max_weight=self.max_asset_weight,
-        )
+    def _advance_with_weights(
+        self,
+        weights: np.ndarray,
+        *,
+        reward_adjustment: float = 0.0,
+        extra_info: dict | None = None,
+    ):
+        weights = np.clip(np.asarray(weights, dtype=float).reshape(-1), 0.0, None)
+        if weights.shape != (self.n_assets,):
+            raise ValueError(
+                f"weights must have shape ({self.n_assets},), got {weights.shape}"
+            )
+        total_weight = float(weights.sum())
+        if total_weight <= 1e-12:
+            weights = np.ones(self.n_assets, dtype=float) / self.n_assets
+        else:
+            weights = weights / total_weight
+
         turnover = float(np.sum(np.abs(weights - self.asset_weights)))
         transaction_cost = turnover * self.transaction_fee
 
@@ -471,9 +544,7 @@ class PPOPortfolioEnv(gym.Env):
         next_peak_value = max(self.peak_value, next_portfolio_value)
         drawdown = 1.0 - (next_portfolio_value / max(next_peak_value, 1e-12))
         drawdown_worsening = max(drawdown - previous_drawdown, 0.0)
-        target_concentration = (1.0 / self.n_assets) + self.risk_appetite * (
-            min(0.45, 1.0) - (1.0 / self.n_assets)
-        )
+        target_concentration = _risk_concentration_target(self.n_assets, self.risk_appetite)
         concentration_excess = max(concentration - target_concentration, 0.0)
         downside_return = max(-portfolio_return, 0.0)
         risk_penalty = (1.0 - self.risk_appetite) * self.variance_penalty_scale * portfolio_volatility
@@ -482,15 +553,36 @@ class PPOPortfolioEnv(gym.Env):
             target_volatility_penalty = self.target_volatility_penalty_scale * abs(
                 portfolio_volatility - self.target_daily_volatility
             )
+        self.episode_log_return += float(np.log(net_return))
+        self.episode_benchmark_log_return += float(np.log(max(1.0 + benchmark_return, 1e-6)))
+        self.concentration_history.append(concentration)
+        terminated = self.current_step + 1 >= self.end_step
+        terminal_reward = 0.0
+        if terminated:
+            horizon_alpha = self.episode_log_return - self.episode_benchmark_log_return
+            average_concentration = (
+                float(np.mean(self.concentration_history))
+                if self.concentration_history
+                else concentration
+            )
+            terminal_reward = (
+                self.horizon_reward_scale * self.episode_log_return
+                + self.benchmark_reward_scale * horizon_alpha
+                - self.diversification_reward_scale
+                * max(average_concentration - target_concentration, 0.0)
+            )
+
         raw_reward = (
             float(np.log(net_return))
             + (self.benchmark_reward_scale * (portfolio_return - benchmark_return))
+            + terminal_reward
             - risk_penalty
             - target_volatility_penalty
             - (self.turnover_penalty * turnover)
             - (self.concentration_penalty_scale * concentration_excess)
             - (self.downside_penalty_scale * downside_return)
             - (self.drawdown_penalty_scale * (drawdown + drawdown_worsening))
+            + float(reward_adjustment)
         )
         reward = self.reward_scale * raw_reward
 
@@ -498,7 +590,6 @@ class PPOPortfolioEnv(gym.Env):
         self.peak_value = next_peak_value
         self.asset_weights = weights
         self.current_step += 1
-        terminated = self.current_step >= self.end_step
 
         observation = self._observation()
         info = {
@@ -516,11 +607,175 @@ class PPOPortfolioEnv(gym.Env):
             "concentration_excess": concentration_excess,
             "risk_penalty": risk_penalty,
             "raw_reward": raw_reward,
+            "terminal_reward": terminal_reward,
+            "horizon_log_return": self.episode_log_return,
+            "horizon_benchmark_log_return": self.episode_benchmark_log_return,
             "drawdown": drawdown,
             "drawdown_worsening": drawdown_worsening,
             "risk_appetite": float(self.risk_appetite),
         }
+        if extra_info:
+            info.update(extra_info)
         return observation, reward, terminated, False, info
+
+    def step(self, action):
+        weights = normalize_action_with_cash_sleeve(
+            np.asarray(action, dtype=float),
+            risky_asset_count=self.risky_asset_count,
+            max_risky_weight=self.max_asset_weight,
+            max_cash_weight=_risk_cash_cap(self.risk_appetite, configured_max=self.max_cash_weight),
+        )
+        return self._advance_with_weights(
+            weights,
+            extra_info={"action_layout": "target_weights"},
+        )
+
+
+class PPOTickerActionEnv(PPOPortfolioEnv):
+    """PPO environment with one buy/sell/hold decision per ticker per step."""
+
+    ACTION_HOLD = 0
+    ACTION_BUY = 1
+    ACTION_SELL = 2
+    ACTION_NAMES = {
+        ACTION_HOLD: "hold",
+        ACTION_BUY: "buy",
+        ACTION_SELL: "sell",
+    }
+    DEFAULT_TRADE_SIZE_BUCKETS = (0.01, 0.025, 0.05, 0.10, 0.20)
+
+    def __init__(
+        self,
+        *,
+        trade_size_buckets: tuple[float, ...] | list[float] | np.ndarray | None = None,
+        tradable_asset_count: int | None = None,
+        invalid_action_penalty: float = 0.001,
+        initial_cash_weight: float = 1.0,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.tradable_asset_count = int(tradable_asset_count or self.risky_asset_count)
+        if self.tradable_asset_count <= 0:
+            raise ValueError("tradable_asset_count must be positive")
+        if self.tradable_asset_count >= self.n_assets:
+            raise ValueError("PPOTickerActionEnv requires a cash sleeve after tradable assets")
+
+        self.cash_index = self.tradable_asset_count
+        buckets = (
+            self.DEFAULT_TRADE_SIZE_BUCKETS
+            if trade_size_buckets is None
+            else tuple(float(value) for value in trade_size_buckets)
+        )
+        self.trade_size_buckets = np.asarray(sorted(set(buckets)), dtype=float)
+        if self.trade_size_buckets.ndim != 1 or self.trade_size_buckets.size == 0:
+            raise ValueError("trade_size_buckets must contain at least one size")
+        if not np.all(np.isfinite(self.trade_size_buckets)):
+            raise ValueError("trade_size_buckets must be finite")
+        if np.any(self.trade_size_buckets <= 0.0):
+            raise ValueError("trade_size_buckets must be positive")
+
+        self.invalid_action_penalty = float(invalid_action_penalty)
+        self.initial_cash_weight = float(np.clip(initial_cash_weight, 0.0, 1.0))
+        nvec = np.tile(
+            np.array([3, self.trade_size_buckets.size], dtype=np.int64),
+            self.tradable_asset_count,
+        )
+        self.action_space = spaces.MultiDiscrete(nvec)
+
+    def reset(self, *, seed: int | None = None, options: dict | None = None):
+        _, info = super().reset(seed=seed, options=options)
+        self.asset_weights = np.zeros(self.n_assets, dtype=float)
+        residual_risky_weight = max(1.0 - self.initial_cash_weight, 0.0)
+        if residual_risky_weight > 0.0:
+            self.asset_weights[: self.tradable_asset_count] = (
+                residual_risky_weight / self.tradable_asset_count
+            )
+        self.asset_weights[self.cash_index] = self.initial_cash_weight
+        return self._observation(), info
+
+    def _action_pairs(self, action) -> np.ndarray:
+        raw_action = np.asarray(action, dtype=int).reshape(-1)
+        expected_size = self.tradable_asset_count * 2
+        if raw_action.size != expected_size:
+            raise ValueError(
+                f"ticker action must contain {expected_size} values, got {raw_action.size}"
+            )
+        pairs = raw_action.reshape(self.tradable_asset_count, 2)
+        pairs[:, 0] = np.clip(pairs[:, 0], 0, 2)
+        pairs[:, 1] = np.clip(pairs[:, 1], 0, self.trade_size_buckets.size - 1)
+        return pairs
+
+    def _apply_ticker_actions(self, action) -> tuple[np.ndarray, list[dict], int]:
+        pairs = self._action_pairs(action)
+        next_weights = self.asset_weights.copy()
+        cash_weight = float(next_weights[self.cash_index])
+        executed_actions: list[dict] = []
+        invalid_actions = 0
+
+        for asset_index, (action_type, size_index) in enumerate(pairs):
+            if int(action_type) != self.ACTION_SELL:
+                continue
+            requested_size = float(self.trade_size_buckets[int(size_index)])
+            weight_before = float(next_weights[asset_index])
+            executable_size = min(requested_size, weight_before)
+            if executable_size <= 1e-12:
+                invalid_actions += 1
+                continue
+            next_weights[asset_index] -= executable_size
+            cash_weight += executable_size
+            next_weights[self.cash_index] = cash_weight
+            executed_actions.append(
+                {
+                    "asset_index": int(asset_index),
+                    "action": "sell",
+                    "size_bucket": requested_size,
+                    "executed_weight_delta": float(-executable_size),
+                    "weight_before": weight_before,
+                    "weight_after": float(next_weights[asset_index]),
+                }
+            )
+
+        for asset_index, (action_type, size_index) in enumerate(pairs):
+            if int(action_type) != self.ACTION_BUY:
+                continue
+            requested_size = float(self.trade_size_buckets[int(size_index)])
+            weight_before = float(next_weights[asset_index])
+            asset_cap = 1.0 if self.max_asset_weight is None else float(self.max_asset_weight)
+            headroom = max(asset_cap - weight_before, 0.0)
+            executable_size = min(requested_size, cash_weight, headroom)
+            if executable_size <= 1e-12:
+                invalid_actions += 1
+                continue
+            next_weights[asset_index] += executable_size
+            cash_weight -= executable_size
+            next_weights[self.cash_index] = cash_weight
+            executed_actions.append(
+                {
+                    "asset_index": int(asset_index),
+                    "action": "buy",
+                    "size_bucket": requested_size,
+                    "executed_weight_delta": float(executable_size),
+                    "weight_before": weight_before,
+                    "weight_after": float(next_weights[asset_index]),
+                }
+            )
+
+        return next_weights, executed_actions, invalid_actions
+
+    def step(self, action):
+        weights, executed_actions, invalid_actions = self._apply_ticker_actions(action)
+        reward_adjustment = -self.invalid_action_penalty * float(invalid_actions)
+        return self._advance_with_weights(
+            weights,
+            reward_adjustment=reward_adjustment,
+            extra_info={
+                "action_layout": "per_ticker_buy_sell_hold",
+                "ticker_actions": executed_actions,
+                "invalid_action_count": int(invalid_actions),
+                "invalid_action_penalty": float(-reward_adjustment),
+                "cash_weight": float(weights[self.cash_index]),
+            },
+        )
 
 
 def _evaluate_model(
@@ -630,6 +885,8 @@ def train_asset_agent(
         split_index=split_index,
         config=config,
     )
+    risky_asset_count = int(len(tickers))
+    prices, ohlcv = _append_cash_sleeve_arrays(prices, ohlcv, config=config)
     train_data, eval_data = split_training_data(
         prices=prices,
         ohlcv=ohlcv,
@@ -664,11 +921,15 @@ def train_asset_agent(
                     drawdown_penalty_scale=config.drawdown_penalty_scale,
                     downside_penalty_scale=config.downside_penalty_scale,
                     benchmark_reward_scale=config.benchmark_reward_scale,
+                    horizon_reward_scale=config.horizon_reward_scale,
+                    diversification_reward_scale=config.diversification_reward_scale,
                     target_daily_volatility=config.target_daily_volatility,
                     target_volatility_penalty_scale=config.target_volatility_penalty_scale,
                     max_asset_weight=config.max_asset_weight,
+                    max_cash_weight=config.max_cash_weight,
                     reward_scale=config.reward_scale,
                     random_start=config.random_start,
+                    risky_asset_count=risky_asset_count,
                 )
             )
             env.reset(seed=config.seed + rank)
@@ -697,12 +958,16 @@ def train_asset_agent(
             drawdown_penalty_scale=config.drawdown_penalty_scale,
             downside_penalty_scale=config.downside_penalty_scale,
             benchmark_reward_scale=config.benchmark_reward_scale,
+            horizon_reward_scale=config.horizon_reward_scale,
+            diversification_reward_scale=config.diversification_reward_scale,
             target_daily_volatility=config.target_daily_volatility,
             target_volatility_penalty_scale=config.target_volatility_penalty_scale,
             max_asset_weight=config.max_asset_weight,
+            max_cash_weight=config.max_cash_weight,
             reward_scale=config.reward_scale,
             random_start=False,
             fixed_risk=0.5,
+            risky_asset_count=risky_asset_count,
         )
 
     train_env = DummyVecEnv(
@@ -785,7 +1050,19 @@ def train_asset_agent(
             "algorithm": "ppo",
             "policy_backend": "sb3",
             "model_file": "model.zip",
-            "feature_version": "ohlcv-stationary-v3",
+            "feature_version": (
+                "ohlcv-stationary-v4-cash-sleeve"
+                if config.cash_enabled
+                else "ohlcv-stationary-v3"
+            ),
+            "sub_agent_architecture": {
+                "cash_sleeve_enabled": config.cash_enabled,
+                "objective": "horizon_return_plus_diversification",
+                "risky_asset_count": risky_asset_count,
+                "action_dim": int(train_data["prices"].shape[1]),
+                "risk_cash_cap": "0.08 + (1 - risk) * 0.42, capped by max_cash_weight",
+                "risk_concentration_target": "equal_weight_hhi + risk * (0.45 - equal_weight_hhi)",
+            },
             "single_agent_feature_engineering": {
                 "market_features": "stationary_returns_volatility_ohlcv_drawdown",
                 "indicator_scaler": "RobustScaler(quantile_range=(5, 95)) fit on training split only",
@@ -798,6 +1075,7 @@ def train_asset_agent(
             "macro_feature_count": int(macro.shape[1]),
             "ppo_retrained_at": datetime.now(UTC).isoformat(),
             "ppo_training_config": asdict(config),
+            "action_dim": int(train_data["prices"].shape[1]),
             **evaluation_metrics,
             "train_rows": int(train_data["prices"].shape[0]),
             "eval_rows": int(eval_data["prices"].shape[0]),

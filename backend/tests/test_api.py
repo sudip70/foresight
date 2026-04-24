@@ -14,6 +14,77 @@ def test_models_endpoint_exposes_feature_groups(client):
     assert "expected_returns" in payload["feature_groups"]
 
 
+def test_universe_endpoint_returns_current_artifact_tickers(client):
+    response = client.get("/api/universe")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["supported_asset_classes"] == ["stock", "crypto", "etf"]
+    assert len(payload["tickers"]) == 6
+    assert {entry["asset_class"] for entry in payload["tickers"]} == {
+        "stock",
+        "crypto",
+        "etf",
+    }
+    assert all(entry["latest_price"] > 0 for entry in payload["tickers"])
+
+
+def test_ticker_forecast_endpoint_returns_ordered_scenarios(client):
+    response = client.post(
+        "/api/forecasts/ticker",
+        json={"ticker": "AAPL", "horizon_days": 45, "window_size": 5},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ticker"] == "AAPL"
+    assert payload["asset_class"] == "stock"
+    assert payload["target_prices"]["bear"] < payload["target_prices"]["base"]
+    assert payload["target_prices"]["base"] < payload["target_prices"]["bull"]
+    assert len(payload["historical_prices"]) > 1
+    assert payload["forecast_paths"]["base"][0]["price"] == payload["latest_price"]
+    assert len(payload["forecast_paths"]["base"]) == 46
+    assert len({round(point["price"], 4) for point in payload["forecast_paths"]["base"]}) > 10
+    assert payload["return_estimator"]["method"] == "multi_window_shrunk"
+    assert 0 <= payload["confidence"] <= 1
+
+
+def test_ticker_forecast_invalid_ticker_returns_clear_error(client):
+    response = client.post(
+        "/api/forecasts/ticker",
+        json={"ticker": "NOTREAL", "horizon_days": 30},
+    )
+    assert response.status_code == 422
+    assert "Unsupported ticker" in response.json()["detail"]
+
+
+def test_market_forecast_endpoint_returns_ranked_tickers(client):
+    response = client.post(
+        "/api/forecasts/market",
+        json={"horizon_days": 30, "risk": 0.6, "top_n": 4, "window_size": 5},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["ranked_tickers"]) == 4
+    scores = [entry["opportunity_score"] for entry in payload["ranked_tickers"]]
+    assert scores == sorted(scores, reverse=True)
+    assert "best_base_case" in payload["highlights"]
+    assert "macro_snapshot" in payload
+
+
+def test_portfolio_simulation_returns_forecast_driven_allocations(client):
+    response = client.post(
+        "/api/portfolio/simulations",
+        json={"amount": 10000, "risk": 0.7, "horizon_days": 60, "window_size": 5},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    total_weight = sum(allocation["weight"] for allocation in payload["asset_allocations"])
+    assert abs(total_weight - 1.0) < 1e-6
+    assert payload["summary"]["bear_value"] < payload["summary"]["base_value"]
+    assert payload["summary"]["base_value"] < payload["summary"]["bull_value"]
+    assert payload["trade_plan"]
+    assert any(allocation["asset_class"] == "cash" for allocation in payload["asset_allocations"])
+
+
 def test_inference_endpoint_returns_allocations_and_summary(client):
     response = client.post(
         "/api/inference",
@@ -22,9 +93,34 @@ def test_inference_endpoint_returns_allocations_and_summary(client):
     assert response.status_code == 200
     payload = response.json()
     assert payload["model_version"] == "fixture-v1"
-    assert len(payload["class_allocations"]) == 3
-    assert len(payload["asset_allocations"]) == 6
+    assert len(payload["class_allocations"]) == 4
+    assert len(payload["asset_allocations"]) == 7
     assert payload["summary"]["portfolio_variance"] >= 0
+    assert payload["summary"]["projected_value"] > 0
+    assert payload["summary"]["projected_profit"] > -15000
+    assert payload["latest_snapshot"]["policy_mix"]["sub_agent_consensus_blend"] > 0
+    cash_weight = next(
+        allocation["weight"]
+        for allocation in payload["class_allocations"]
+        if allocation["asset_class"] == "cash"
+    )
+    assert cash_weight <= payload["latest_snapshot"]["policy_mix"]["risk_cash_cap"] + 1e-6
+    assert payload["trade_log"]
+
+
+def test_short_projection_window_uses_stabilized_return_estimator(client):
+    response = client.post(
+        "/api/inference",
+        json={"amount": 10000, "risk": 0.8, "duration": 300, "window_size": 5},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    estimator = payload["latest_snapshot"]["policy_mix"]["return_estimator"]["stock"]
+
+    assert estimator["method"] == "multi_window_shrunk"
+    assert estimator["requested_window"] == 5
+    assert min(estimator["projection_windows"]) >= 20
+    assert abs(payload["summary"]["projected_horizon_return"]) < 1.0
 
 
 def test_explanations_endpoint_returns_grouped_contributions(client):
@@ -50,4 +146,4 @@ def test_backtests_endpoint_returns_curves_and_metrics(client):
     assert payload["summary_metrics"]["ending_value"] > 0
     assert len(payload["equity_curve"]) == 9
     assert len(payload["drawdown_curve"]) == 9
-
+    assert payload["trade_log"]

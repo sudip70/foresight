@@ -22,6 +22,80 @@ class ModelsResponse(BaseModel):
     explainability: dict[str, Any]
 
 
+class UniverseResponse(BaseModel):
+    latest_date: str
+    supported_asset_classes: list[str]
+    asset_classes: list[dict[str, Any]]
+    tickers: list[dict[str, Any]]
+    disclaimer: str
+
+
+class TickerForecastRequest(BaseModel):
+    ticker: str = Field(min_length=1)
+    horizon_days: int = Field(default=300, ge=1)
+    window_size: int = Field(default=60, ge=2)
+    strict_validation: bool = False
+
+
+class TickerForecastResponse(BaseModel):
+    ticker: str
+    asset_class: str
+    latest_date: str
+    latest_price: float
+    horizon_days: int
+    historical_prices: list[dict[str, Any]]
+    forecast_paths: dict[str, list[dict[str, Any]]]
+    target_prices: dict[str, float]
+    returns: dict[str, float]
+    risk_metrics: dict[str, float]
+    confidence: float
+    confidence_label: str
+    risk_label: str
+    opportunity_score: float
+    return_estimator: dict[str, Any]
+    literacy: dict[str, str]
+    plain_language: str
+
+
+class MarketForecastRequest(BaseModel):
+    horizon_days: int = Field(default=300, ge=1)
+    risk: float = Field(default=0.5, ge=0.0, le=1.0)
+    top_n: int = Field(default=10, ge=1, le=50)
+    window_size: int = Field(default=60, ge=2)
+    strict_validation: bool = False
+
+
+class MarketForecastResponse(BaseModel):
+    horizon_days: int
+    risk: float
+    ranked_tickers: list[dict[str, Any]]
+    highlights: dict[str, Any]
+    macro_snapshot: dict[str, Any]
+    disclaimer: str
+
+
+class PortfolioSimulationRequest(BaseModel):
+    amount: float = Field(default=10000.0, gt=0)
+    risk: float = Field(default=0.5, ge=0.0, le=1.0)
+    horizon_days: int = Field(default=300, ge=1)
+    selected_tickers: list[str] | None = None
+    window_size: int = Field(default=60, ge=2)
+    strict_validation: bool = False
+
+
+class PortfolioSimulationResponse(BaseModel):
+    amount: float
+    risk: float
+    horizon_days: int
+    method: str
+    summary: dict[str, float]
+    asset_allocations: list[dict[str, Any]]
+    class_allocations: list[dict[str, Any]]
+    trade_plan: list[dict[str, Any]]
+    source_forecasts: list[dict[str, Any]]
+    warnings: list[str]
+
+
 class InferenceRequest(BaseModel):
     amount: float = Field(default=10000.0, gt=0)
     risk: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -39,6 +113,7 @@ class InferenceResponse(BaseModel):
     sub_agent_allocations: dict[str, list[dict[str, Any]]]
     latest_snapshot: dict[str, Any]
     top_asset_targets: list[str]
+    trade_log: list[dict[str, Any]]
 
 
 class ExplanationRequest(InferenceRequest):
@@ -74,5 +149,5 @@ class BacktestResponse(BaseModel):
     summary_metrics: dict[str, float]
     equity_curve: list[dict[str, Any]]
     drawdown_curve: list[dict[str, Any]]
+    trade_log: list[dict[str, Any]]
     warnings: list[str]
-

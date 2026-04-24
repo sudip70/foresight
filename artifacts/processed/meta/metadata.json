@@ -1,12 +1,17 @@
 {
-  "action_dim": 30,
+  "action_dim": 4,
   "algorithm": "sac",
+  "class_feature_dim": 12,
   "class_order": [
     "stock",
     "crypto",
     "etf"
   ],
   "class_ranges": {
+    "cash": [
+      30,
+      31
+    ],
     "crypto": [
       10,
       20
@@ -20,46 +25,89 @@
       10
     ]
   },
-  "eval_mean_agent_alpha": -5.406727188351357e-06,
-  "eval_mean_final_value": 1.0190094377131487,
-  "eval_mean_max_drawdown": 0.21317811120574137,
-  "eval_mean_reward": -264.48698798098786,
-  "eval_mean_sharpe": 0.4137972529555702,
+  "eval_date_range": {
+    "end": "2026-04-22",
+    "start": "2024-12-04"
+  },
+  "eval_mean_agent_alpha": 0.0003412593504100744,
+  "eval_mean_final_value": 1.0110523040179062,
+  "eval_mean_max_drawdown": 0.13514117418835692,
+  "eval_mean_reward": -213.31326829660443,
+  "eval_mean_sharpe": 0.5434790280991957,
   "eval_rows": 345,
-  "feature_version": "sac-meta-v2-subagent-aware",
+  "feature_version": "sac-meta-v3-globalmacro-cashaware",
   "guardrails": {
+    "cash_annual_return": 0.04,
+    "cash_enabled": true,
+    "cash_shortfall_penalty_scale": 0.0,
     "hard_min_stock_weight_removed": true,
     "max_asset_weight": 0.2,
+    "max_cash_weight": 0.95,
     "max_crypto_weight": 0.3,
     "max_etf_weight": 0.7,
-    "max_stock_weight": 0.85
+    "max_stock_weight": 0.85,
+    "min_expected_daily_return": 0.0
   },
-  "inference_observation_dim": 451,
+  "inference_observation_dim": 447,
+  "meta_architecture": {
+    "class_feature_layout": [
+      "class_expected_return",
+      "class_volatility",
+      "class_previous_weight",
+      "class_cash_weight"
+    ],
+    "meta_action_layout": "stock_crypto_etf_cash_sleeves",
+    "shared_global_macro": true,
+    "sub_agent_cash_aware": true,
+    "sub_agent_signal_layout": "per-class risky weights scaled by class count plus mean cash prior"
+  },
+  "meta_macro_feature_names": [
+    "VIX Market Volatility",
+    "Federal Funds Rate",
+    "10-Year Treasury Yield",
+    "Unemployment Rate",
+    "CPI All Items",
+    "Recession Indicator"
+  ],
   "model_file": "model.zip",
+  "policy_action_layout": "stock_crypto_etf_cash_sleeves",
+  "policy_action_names": [
+    "stock",
+    "crypto",
+    "etf",
+    "cash"
+  ],
   "policy_backend": "sb3",
-  "policy_observation_dim": 451,
-  "sac_retrained_at": "2026-04-23T03:41:33.279855+00:00",
+  "policy_observation_dim": 447,
+  "sac_retrained_at": "2026-04-24T02:13:48.485472+00:00",
   "sac_training_config": {
     "activation_fn": "relu",
     "batch_size": 256,
     "benchmark_reward_scale": 0.5,
     "buffer_size": 100000,
+    "cash_annual_return": 0.04,
+    "cash_enabled": true,
+    "cash_shortfall_penalty_scale": 0.0,
     "concentration_penalty_scale": 0.01,
     "device": "cpu",
+    "diversification_reward_scale": 0.1,
     "downside_penalty_scale": 0.25,
     "drawdown_penalty_scale": 0.05,
     "ent_coef": "auto",
     "episode_length": 252,
-    "eval_freq": 5000,
+    "eval_freq": 10000,
     "eval_ratio": 0.2,
     "gamma": 0.99,
     "gradient_steps": 1,
+    "horizon_reward_scale": 1.0,
     "learning_rate": 0.0003,
     "learning_starts": 2000,
     "max_asset_weight": 0.2,
+    "max_cash_weight": 0.95,
     "max_crypto_weight": 0.3,
     "max_etf_weight": 0.7,
     "max_stock_weight": 0.85,
+    "min_expected_daily_return": 0.0,
     "policy_layers": [
       256,
       256
@@ -74,7 +122,7 @@
     "target_daily_volatility": 0.014,
     "target_volatility_penalty_scale": 0.25,
     "tau": 0.005,
-    "total_timesteps": 150000,
+    "total_timesteps": 500000,
     "train_freq": 1,
     "transaction_fee": 0.001,
     "turnover_penalty": 0.001,
@@ -82,5 +130,10 @@
     "volatility_penalty_scale": 0.5,
     "window_size": 60
   },
-  "train_rows": 1139
+  "train_date_range": {
+    "end": "2025-03-04",
+    "start": "2020-08-20"
+  },
+  "train_rows": 1139,
+  "uses_shared_macro": true
 }
