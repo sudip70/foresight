@@ -11,4 +11,9 @@ dist/
 build/
 *.egg-info/
 frontend/.DS_Store
-archive/legacy/**/__pycache__/
+archive/legacy/
+datasets/raw/legacy/
+artifacts/reports/legacy/
+artifacts/processed/.*.backup_before_commit_*/
+artifacts/processed/**/*.backup_before_*.npy
+artifacts/processed/**/model.backup_before_*.zip

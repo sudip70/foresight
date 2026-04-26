@@ -7,7 +7,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 
 from backend.app.ml.feature_groups import group_feature_values
-from backend.app.ml.pipeline import ASSET_CLASSES, InferenceResult, StockifyEngine
+from backend.app.ml.pipeline import InferenceResult, StockifyEngine
 
 
 @dataclass

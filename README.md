@@ -17,8 +17,7 @@ Phase 1 replaces the legacy Streamlit prototype with:
 - `frontend/`: static dashboard for GitHub Pages
 - `offline/`: data-repair and offline preparation scripts
 - `artifacts/processed/`: active RL model artifacts and aligned processed arrays
-- `datasets/raw/`: raw and legacy source datasets used by offline scripts
-- `archive/legacy/`: retired Streamlit app, training scripts, experiments, and generated clutter
+- `datasets/raw/`: active macroeconomic CSV and downloaded OHLCV market snapshots used by offline scripts
 
 ## Runtime Scope
 
@@ -162,4 +161,5 @@ The automated tests use synthetic fixture artifacts and fixed-weight policies so
 - FastAPI is the only active runtime entrypoint.
 - GitHub Pages serves the frontend as static assets only.
 - Render serves the backend.
+- Retired Streamlit prototypes, experiments, and generated backup artifacts are intentionally excluded from the active repository layout.
 - FRED access, if needed for offline jobs, must come from `FRED_API_KEY` in the environment. No secrets are hard-coded in the repository.
