@@ -1,14 +1,14 @@
 {
   "asset_class": "crypto",
-  "backup_path": "/Users/sudipshrestha/Projects-website/stockify/Stockify_Backup/artifacts/processed/crypto/model.backup_before_retrain_20260424T012339Z.zip",
-  "eval_mean_benchmark_alpha": 0.00029371536224087955,
-  "eval_mean_final_value": 1.0491308404259039,
-  "eval_mean_max_drawdown": 0.2811883636642577,
-  "eval_mean_reward": -507.44380138887226,
-  "eval_mean_sharpe": 0.546094593810261,
+  "backup_path": "/Users/sudipshrestha/Projects-website/stockify/Stockify_Backup/artifacts/processed/crypto/model.backup_before_retrain_20260424T203732Z.zip",
+  "eval_mean_benchmark_alpha": -0.0001361150529432695,
+  "eval_mean_final_value": 0.9383383284788266,
+  "eval_mean_max_drawdown": 0.2534647950725266,
+  "eval_mean_reward": -680.3632466527454,
+  "eval_mean_sharpe": 0.34838334955080874,
   "eval_rows": 475,
   "model_path": "/Users/sudipshrestha/Projects-website/stockify/Stockify_Backup/artifacts/processed/crypto/model.zip",
-  "total_timesteps": 200000,
+  "total_timesteps": 400000,
   "train_rows": 1657,
-  "trained_at": "2026-04-24T01:23:39.246174+00:00"
+  "trained_at": "2026-04-24T20:37:32.962951+00:00"
 }

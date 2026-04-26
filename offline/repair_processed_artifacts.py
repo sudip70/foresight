@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from argparse import ArgumentParser
 from datetime import UTC, datetime
 from pathlib import Path
 import json
+import shutil
 import sys
 
 import numpy as np
@@ -43,8 +45,22 @@ def _save_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
-def repair_asset(asset_class: str) -> dict:
-    asset_dir = ARTIFACT_ROOT / asset_class
+def _backup_file(path: Path, *, timestamp: str) -> str | None:
+    if not path.exists():
+        return None
+    backup_path = path.with_name(f"{path.stem}.backup_before_repair_{timestamp}{path.suffix}")
+    shutil.copy2(path, backup_path)
+    return str(backup_path)
+
+
+def _save_array_with_backup(path: Path, values: np.ndarray, *, timestamp: str) -> str | None:
+    backup_path = _backup_file(path, timestamp=timestamp)
+    np.save(path, values)
+    return backup_path
+
+
+def repair_asset(asset_class: str, *, artifact_root: Path, dry_run: bool) -> dict:
+    asset_dir = artifact_root / asset_class
     tickers = json.loads((asset_dir / "tickers.json").read_text())
     prices = np.load(asset_dir / "prices.npy")
     dates_path = asset_dir / "dates.npy"
@@ -54,6 +70,10 @@ def repair_asset(asset_class: str) -> dict:
     regimes = np.load(asset_dir / "regimes.npy")
     micro = np.load(asset_dir / "micro_indicators.npy")
     macro = np.load(asset_dir / "macro_indicators.npy")
+    micro_raw_path = asset_dir / "micro_indicators_raw.npy"
+    macro_raw_path = asset_dir / "macro_indicators_raw.npy"
+    micro_raw = np.load(micro_raw_path) if micro_raw_path.exists() else None
+    macro_raw = np.load(macro_raw_path) if macro_raw_path.exists() else None
 
     dates, prices, ohlcv, regimes, micro, macro, alignment = validate_and_align_asset_artifacts(
         tickers=tickers,
@@ -65,13 +85,46 @@ def repair_asset(asset_class: str) -> dict:
         macro_indicators=macro,
         strict=False,
     )
+    if micro_raw is not None:
+        micro_raw = np.asarray(micro_raw, dtype=float)[-alignment.aligned_rows:]
+    if macro_raw is not None:
+        macro_raw = np.asarray(macro_raw, dtype=float)[-alignment.aligned_rows:]
 
-    np.save(asset_dir / "dates.npy", dates)
-    np.save(asset_dir / "prices.npy", prices)
-    np.save(asset_dir / "ohlcv.npy", ohlcv)
-    np.save(asset_dir / "regimes.npy", regimes)
-    np.save(asset_dir / "micro_indicators.npy", micro)
-    np.save(asset_dir / "macro_indicators.npy", macro)
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    output_shapes = {
+        "dates.npy": list(dates.shape),
+        "prices.npy": list(prices.shape),
+        "ohlcv.npy": list(ohlcv.shape),
+        "regimes.npy": list(regimes.shape),
+        "micro_indicators.npy": list(micro.shape),
+        "macro_indicators.npy": list(macro.shape),
+    }
+    if micro_raw is not None:
+        output_shapes["micro_indicators_raw.npy"] = list(micro_raw.shape)
+    if macro_raw is not None:
+        output_shapes["macro_indicators_raw.npy"] = list(macro_raw.shape)
+    backups: dict[str, str] = {}
+    if not dry_run:
+        arrays_to_write = {
+            "dates.npy": dates,
+            "prices.npy": prices,
+            "ohlcv.npy": ohlcv,
+            "regimes.npy": regimes,
+            "micro_indicators.npy": micro,
+            "macro_indicators.npy": macro,
+        }
+        if micro_raw is not None:
+            arrays_to_write["micro_indicators_raw.npy"] = micro_raw
+        if macro_raw is not None:
+            arrays_to_write["macro_indicators_raw.npy"] = macro_raw
+        for filename, values in arrays_to_write.items():
+            backup_path = _save_array_with_backup(
+                asset_dir / filename,
+                values,
+                timestamp=timestamp,
+            )
+            if backup_path is not None:
+                backups[filename] = backup_path
 
     metadata = _load_json(asset_dir / "metadata.json", DEFAULT_ASSET_METADATA[asset_class])
     metadata.update(
@@ -85,23 +138,54 @@ def repair_asset(asset_class: str) -> dict:
             "original_rows": alignment.original_rows,
             "trimmed": alignment.trimmed,
             "repaired_at": datetime.now(UTC).isoformat(),
+            "repair_dry_run": dry_run,
         }
     )
-    _save_json(asset_dir / "metadata.json", metadata)
-    return metadata
+    if not dry_run:
+        _save_json(asset_dir / "metadata.json", metadata)
+    return {
+        **metadata,
+        "would_write": output_shapes,
+        "array_backups": backups,
+    }
 
 
-def repair_meta() -> dict:
-    meta_dir = ARTIFACT_ROOT / "meta"
+def repair_meta(*, artifact_root: Path, dry_run: bool) -> dict:
+    meta_dir = artifact_root / "meta"
     metadata = _load_json(meta_dir / "metadata.json", DEFAULT_META_METADATA)
-    metadata.update({"repaired_at": datetime.now(UTC).isoformat()})
-    _save_json(meta_dir / "metadata.json", metadata)
+    metadata.update({"repaired_at": datetime.now(UTC).isoformat(), "repair_dry_run": dry_run})
+    if not dry_run:
+        _save_json(meta_dir / "metadata.json", metadata)
     return metadata
+
+
+def build_parser() -> ArgumentParser:
+    parser = ArgumentParser(description="Repair processed Foresight artifacts by aligning row counts.")
+    parser.add_argument(
+        "--artifact-root",
+        default=str(ARTIFACT_ROOT),
+        help="Processed artifact root to repair.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the alignment changes without writing arrays or metadata.",
+    )
+    return parser
 
 
 def main() -> None:
-    reports = {asset_class: repair_asset(asset_class) for asset_class in ASSET_CLASSES}
-    reports["meta"] = repair_meta()
+    args = build_parser().parse_args()
+    artifact_root = Path(args.artifact_root)
+    reports = {
+        asset_class: repair_asset(
+            asset_class,
+            artifact_root=artifact_root,
+            dry_run=args.dry_run,
+        )
+        for asset_class in ASSET_CLASSES
+    }
+    reports["meta"] = repair_meta(artifact_root=artifact_root, dry_run=args.dry_run)
     print(json.dumps(reports, indent=2, sort_keys=True))
 
 

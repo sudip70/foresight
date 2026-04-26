@@ -19,7 +19,7 @@ from offline.market_pipeline import (
 
 
 def build_parser() -> ArgumentParser:
-    parser = ArgumentParser(description="Refresh Stockify market data using real OHLCV inputs.")
+    parser = ArgumentParser(description="Refresh Foresight market data using real OHLCV inputs.")
     parser.add_argument(
         "--asset-class",
         action="append",
@@ -60,6 +60,46 @@ def build_parser() -> ArgumentParser:
     return parser
 
 
+def refresh_asset_class(
+    *,
+    asset_class: str,
+    artifact_root: Path,
+    dataset_root: Path,
+    macro_path: Path,
+    end_date: str,
+    fit_new_scalers: bool,
+    skip_scaler_write: bool,
+    market_frame=None,
+) -> dict:
+    config = ASSET_UNIVERSES[asset_class]
+    tickers = list(config["tickers"])
+    benchmark = config["benchmark"]
+    download_tickers = tickers if benchmark in tickers else [*tickers, benchmark]
+
+    if market_frame is None:
+        market_frame = download_ohlcv_history(
+            download_tickers,
+            start_date=config["start_date"],
+            end_date=end_date,
+        )
+    dataset = build_asset_dataset(
+        asset_class=asset_class,
+        market_frame=market_frame,
+        macro_path=macro_path,
+        artifact_root=artifact_root,
+        raw_output_path=dataset_root / "market" / f"{asset_class}_ohlcv.csv",
+        reuse_existing_scalers=not fit_new_scalers,
+        persist_scalers=not skip_scaler_write,
+    )
+    return {
+        "rows": dataset.metadata["aligned_rows"],
+        "date_start": dataset.metadata["date_start"],
+        "date_end": dataset.metadata["date_end"],
+        "benchmark_ticker": dataset.metadata["benchmark_ticker"],
+        "uses_ohlcv_features": dataset.metadata["uses_ohlcv_features"],
+    }
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -71,32 +111,15 @@ def main() -> None:
 
     reports = {}
     for asset_class in asset_classes:
-        config = ASSET_UNIVERSES[asset_class]
-        tickers = list(config["tickers"])
-        benchmark = config["benchmark"]
-        download_tickers = tickers if benchmark in tickers else [*tickers, benchmark]
-
-        market_frame = download_ohlcv_history(
-            download_tickers,
-            start_date=config["start_date"],
-            end_date=args.end_date,
-        )
-        dataset = build_asset_dataset(
+        reports[asset_class] = refresh_asset_class(
             asset_class=asset_class,
-            market_frame=market_frame,
-            macro_path=macro_path,
             artifact_root=artifact_root,
-            raw_output_path=dataset_root / "market" / f"{asset_class}_ohlcv.csv",
-            reuse_existing_scalers=not args.fit_new_scalers,
-            persist_scalers=not args.skip_scaler_write,
+            dataset_root=dataset_root,
+            macro_path=macro_path,
+            end_date=args.end_date,
+            fit_new_scalers=args.fit_new_scalers,
+            skip_scaler_write=args.skip_scaler_write,
         )
-        reports[asset_class] = {
-            "rows": dataset.metadata["aligned_rows"],
-            "date_start": dataset.metadata["date_start"],
-            "date_end": dataset.metadata["date_end"],
-            "benchmark_ticker": dataset.metadata["benchmark_ticker"],
-            "uses_ohlcv_features": dataset.metadata["uses_ohlcv_features"],
-        }
 
     print(json.dumps(reports, indent=2, sort_keys=True))
 

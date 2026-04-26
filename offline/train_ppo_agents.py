@@ -15,7 +15,7 @@ from offline.ppo_training import PPOTrainingConfig, train_asset_agent
 
 
 def build_parser() -> ArgumentParser:
-    parser = ArgumentParser(description="Retrain Stockify PPO sub-agents on refreshed OHLCV features.")
+    parser = ArgumentParser(description="Retrain Foresight PPO sub-agents on refreshed OHLCV features.")
     parser.add_argument(
         "--asset-class",
         action="append",

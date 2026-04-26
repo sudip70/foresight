@@ -1,2 +1,1 @@
-"""Stockify backend package."""
-
+"""Foresight backend package."""

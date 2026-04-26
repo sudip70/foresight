@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 import os
 
@@ -27,12 +26,21 @@ class Settings:
     meta_min_expected_daily_return: float
     meta_cash_enabled: bool
     meta_cash_annual_return: float
+    market_data_provider: str
+    supabase_url: str
+    supabase_service_role_key: str
 
 
-@lru_cache(maxsize=1)
+_settings: Settings | None = None
+
+
 def get_settings() -> Settings:
-    return Settings(
-        project_name="Stockify Backend",
+    global _settings
+    if _settings is not None:
+        return _settings
+
+    _settings = Settings(
+        project_name="Foresight Backend",
         api_prefix="/api",
         artifact_root=Path(
             os.getenv("STOCKIFY_ARTIFACT_ROOT", REPO_ROOT / "artifacts" / "processed")
@@ -57,4 +65,13 @@ def get_settings() -> Settings:
         meta_cash_enabled=os.getenv("STOCKIFY_META_CASH_ENABLED", "true").lower()
         in {"1", "true", "yes", "on"},
         meta_cash_annual_return=float(os.getenv("STOCKIFY_META_CASH_ANNUAL_RETURN", "0.04")),
+        market_data_provider=os.getenv("STOCKIFY_MARKET_DATA_PROVIDER", "yfinance"),
+        supabase_url=os.getenv("SUPABASE_URL", ""),
+        supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
     )
+    return _settings
+
+
+def reset_settings() -> None:
+    global _settings
+    _settings = None

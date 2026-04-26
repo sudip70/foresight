@@ -1,0 +1,10 @@
+{
+  "macro_dropped_indices": [],
+  "macro_original_count": 6,
+  "macro_selected_count": 6,
+  "macro_source": "macro_indicators_raw.npy",
+  "micro_dropped_indices": [],
+  "micro_original_count": 100,
+  "micro_selected_count": 100,
+  "micro_source": "micro_indicators_raw.npy"
+}

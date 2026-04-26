@@ -1,0 +1,37 @@
+{
+  "version": "v1",
+  "indices": [
+    {
+      "symbol": "SP500",
+      "label": "S&P 500",
+      "display_name": "S&P 500 Index",
+      "provider_symbol": "^GSPC",
+      "currency": "USD",
+      "display_order": 1
+    },
+    {
+      "symbol": "NASDAQ",
+      "label": "Nasdaq",
+      "display_name": "Nasdaq Composite",
+      "provider_symbol": "^IXIC",
+      "currency": "USD",
+      "display_order": 2
+    },
+    {
+      "symbol": "TSX",
+      "label": "TSX",
+      "display_name": "S&P/TSX Composite",
+      "provider_symbol": "^GSPTSE",
+      "currency": "CAD",
+      "display_order": 3
+    },
+    {
+      "symbol": "DOW",
+      "label": "Dow",
+      "display_name": "Dow Jones Industrial Average",
+      "provider_symbol": "^DJI",
+      "currency": "USD",
+      "display_order": 4
+    }
+  ]
+}

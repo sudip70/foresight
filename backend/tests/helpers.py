@@ -41,7 +41,17 @@ def _asset_macro(rows: int, offset: float) -> np.ndarray:
     )
 
 
-def build_fixture_artifact_tree(tmp_path: Path, *, rows: int = 24) -> Path:
+def build_fixture_artifact_tree(
+    tmp_path: Path,
+    *,
+    version: str = "v1",
+    rows: int | None = None,
+) -> Path:
+    if version == "v3":
+        return _build_v3_fixture_artifact_tree(tmp_path, rows=36 if rows is None else rows)
+    if version != "v1":
+        raise ValueError(f"Unsupported fixture artifact version: {version}")
+    rows = 24 if rows is None else rows
     artifact_root = tmp_path / "processed"
     macro_names = ["vix_market_volatility", "federal_funds_rate"]
 
@@ -140,7 +150,7 @@ def build_fixture_artifact_tree(tmp_path: Path, *, rows: int = 24) -> Path:
     return artifact_root
 
 
-def build_v3_fixture_artifact_tree(tmp_path: Path, *, rows: int = 36) -> Path:
+def _build_v3_fixture_artifact_tree(tmp_path: Path, *, rows: int = 36) -> Path:
     artifact_root = tmp_path / "processed_v3"
     macro_names = ["vix_market_volatility", "federal_funds_rate"]
     shared_macro = _asset_macro(rows, 0.0)

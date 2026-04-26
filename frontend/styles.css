@@ -226,6 +226,48 @@ button:hover,
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
+.index-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.index-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+}
+
+.index-card span,
+.index-card small {
+  color: var(--muted);
+}
+
+.index-card strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 1.35rem;
+}
+
+.index-change {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-weight: 800;
+}
+
+.index-change.positive span {
+  color: var(--accent);
+}
+
+.index-change.negative span {
+  color: var(--danger);
+}
+
 .metric {
   padding: 12px;
   box-shadow: none;
@@ -244,6 +286,40 @@ button:hover,
 
 .metric strong {
   font-size: 1.25rem;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 8px 0 14px;
+}
+
+.profile-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: baseline;
+  min-height: 34px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.profile-item span:first-child {
+  color: var(--muted);
+}
+
+.profile-item strong {
+  text-align: right;
+  font-size: 0.96rem;
+}
+
+.freshness-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .term {
@@ -339,6 +415,14 @@ button:hover,
   color: #6f4a0d;
 }
 
+.error-banner {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: #fdecea;
+  border: 1px solid #e7a49c;
+  color: var(--danger);
+}
+
 .advanced,
 .advanced-diagnostics,
 .diagnostics {
@@ -382,7 +466,8 @@ button:hover,
   .hero,
   .controls,
   .grid.two,
-  .forecast-layout {
+  .forecast-layout,
+  .index-strip {
     grid-template-columns: 1fr;
   }
 
@@ -398,7 +483,8 @@ button:hover,
   .market-row,
   .allocation-row,
   .trade-row,
-  .row.two-column {
+  .row.two-column,
+  .profile-grid {
     grid-template-columns: 1fr;
   }
 

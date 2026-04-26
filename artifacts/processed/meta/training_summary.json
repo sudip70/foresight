@@ -1,13 +1,13 @@
 {
-  "backup_path": "/Users/sudipshrestha/Projects-website/stockify/Stockify_Backup/artifacts/processed/meta/model.backup_before_sac_retrain_20260424T021348Z.zip",
-  "eval_mean_agent_alpha": 0.0003412593504100744,
-  "eval_mean_final_value": 1.0110523040179062,
-  "eval_mean_max_drawdown": 0.13514117418835692,
-  "eval_mean_reward": -213.31326829660443,
-  "eval_mean_sharpe": 0.5434790280991957,
+  "backup_path": "/Users/sudipshrestha/Projects-website/stockify/Stockify_Backup/artifacts/processed/meta/model.backup_before_sac_retrain_20260424T212938Z.zip",
+  "eval_mean_agent_alpha": 0.000330499785246888,
+  "eval_mean_final_value": 1.0528499171718644,
+  "eval_mean_max_drawdown": 0.11451724973770427,
+  "eval_mean_reward": -205.74494586266408,
+  "eval_mean_sharpe": 0.7876134383156098,
   "eval_rows": 345,
   "model_path": "/Users/sudipshrestha/Projects-website/stockify/Stockify_Backup/artifacts/processed/meta/model.zip",
-  "total_timesteps": 500000,
+  "total_timesteps": 600000,
   "train_rows": 1139,
-  "trained_at": "2026-04-24T02:13:48.486074+00:00"
+  "trained_at": "2026-04-24T21:29:38.392200+00:00"
 }

@@ -314,6 +314,12 @@ def load_asset_artifacts(root: Path, asset_class: str, *, strict: bool) -> Asset
         macro_indicators=macro_indicators,
         strict=strict,
     )
+    if strict and int(macro_indicators_raw.shape[0]) != alignment.aligned_rows:
+        raise ArtifactValidationError(
+            "Mismatched artifact rows: "
+            f"{{'macro_indicators_raw': {int(macro_indicators_raw.shape[0])}, "
+            f"'aligned_rows': {alignment.aligned_rows}}}"
+        )
 
     feature_names = _read_optional_json(asset_dir / "feature_names.json")
     raw_macro_feature_names = feature_names.get(

@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 import json
+import os
+import shutil
+import tempfile
 import warnings
 
 import joblib
@@ -286,6 +289,32 @@ def _scale_frame(
     return scaled.astype(float), scaler
 
 
+def _stage_artifact_dir(asset_dir: Path) -> Path:
+    asset_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path(
+        tempfile.mkdtemp(
+            prefix=f".{asset_dir.name}.staging.",
+            dir=str(asset_dir.parent),
+        )
+    )
+    if asset_dir.exists():
+        shutil.copytree(asset_dir, staging_dir, dirs_exist_ok=True)
+    return staging_dir
+
+
+def _commit_staged_artifact_dir(staging_dir: Path, asset_dir: Path) -> None:
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    backup_dir = asset_dir.with_name(f".{asset_dir.name}.backup_before_commit_{timestamp}")
+    if asset_dir.exists():
+        os.rename(asset_dir, backup_dir)
+    try:
+        os.rename(staging_dir, asset_dir)
+    except Exception:
+        if backup_dir.exists():
+            os.rename(backup_dir, asset_dir)
+        raise
+
+
 def save_raw_market_csv(frame: pd.DataFrame, output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     flatten_ohlcv_columns(frame).to_csv(output_path, index=True, index_label="Date")
@@ -338,31 +367,31 @@ def build_asset_dataset(
     ).astype(float)
 
     asset_dir = artifact_root / asset_class
-    asset_dir.mkdir(parents=True, exist_ok=True)
+    staging_asset_dir = _stage_artifact_dir(asset_dir)
 
     micro_scaled, _ = _scale_frame(
         micro_frame,
-        scaler_path=asset_dir / "indicator_scaler.pkl",
+        scaler_path=staging_asset_dir / "indicator_scaler.pkl",
         reuse_existing=reuse_existing_scalers,
         persist_scaler=persist_scalers,
     )
     macro_scaled, _ = _scale_frame(
         macro_frame,
-        scaler_path=asset_dir / "macro_scaler.pkl",
+        scaler_path=staging_asset_dir / "macro_scaler.pkl",
         reuse_existing=reuse_existing_scalers,
         persist_scaler=persist_scalers,
     )
 
-    np.save(asset_dir / "prices.npy", prices)
-    np.save(asset_dir / "ohlcv.npy", ohlcv)
-    np.save(asset_dir / "dates.npy", shared_dates.to_numpy(dtype="datetime64[D]"))
-    np.save(asset_dir / "regimes.npy", regime_series.to_numpy(dtype=int))
-    np.save(asset_dir / "micro_indicators_raw.npy", micro_frame.values.astype(float))
-    np.save(asset_dir / "micro_indicators.npy", micro_scaled)
-    np.save(asset_dir / "macro_indicators_raw.npy", macro_frame.values.astype(float))
-    np.save(asset_dir / "macro_indicators.npy", macro_scaled)
-    (asset_dir / "tickers.json").write_text(json.dumps(tickers, indent=2) + "\n")
-    (asset_dir / "feature_names.json").write_text(
+    np.save(staging_asset_dir / "prices.npy", prices)
+    np.save(staging_asset_dir / "ohlcv.npy", ohlcv)
+    np.save(staging_asset_dir / "dates.npy", shared_dates.to_numpy(dtype="datetime64[D]"))
+    np.save(staging_asset_dir / "regimes.npy", regime_series.to_numpy(dtype=int))
+    np.save(staging_asset_dir / "micro_indicators_raw.npy", micro_frame.values.astype(float))
+    np.save(staging_asset_dir / "micro_indicators.npy", micro_scaled)
+    np.save(staging_asset_dir / "macro_indicators_raw.npy", macro_frame.values.astype(float))
+    np.save(staging_asset_dir / "macro_indicators.npy", macro_scaled)
+    (staging_asset_dir / "tickers.json").write_text(json.dumps(tickers, indent=2) + "\n")
+    (staging_asset_dir / "feature_names.json").write_text(
         json.dumps(
             {
                 "micro": list(micro_frame.columns),
@@ -377,7 +406,7 @@ def build_asset_dataset(
     if raw_output_path is not None:
         save_raw_market_csv(normalized_frame.loc[shared_dates], raw_output_path)
 
-    metadata_path = asset_dir / "metadata.json"
+    metadata_path = staging_asset_dir / "metadata.json"
     metadata = {}
     if metadata_path.exists():
         metadata = json.loads(metadata_path.read_text())
@@ -403,6 +432,7 @@ def build_asset_dataset(
         }
     )
     metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+    _commit_staged_artifact_dir(staging_asset_dir, asset_dir)
 
     return AssetDataset(
         asset_class=asset_class,

@@ -12,6 +12,9 @@ class HealthResponse(BaseModel):
     dependencies: dict[str, bool]
     artifacts: dict[str, dict[str, Any]]
     meta_model: dict[str, Any]
+    ready: bool | None = None
+    error: str | None = None
+    market_data: dict[str, Any] | None = None
 
 
 class ModelsResponse(BaseModel):
@@ -28,13 +31,24 @@ class UniverseResponse(BaseModel):
     asset_classes: list[dict[str, Any]]
     tickers: list[dict[str, Any]]
     disclaimer: str
+    source: str | None = None
+
+
+class TickerProfileResponse(BaseModel):
+    ticker: str
+    asset_class: str
+    display_name: str | None = None
+    as_of_date: str | None = None
+    data_as_of: str | None = None
+    source: str
+    fields: dict[str, Any]
 
 
 class TickerForecastRequest(BaseModel):
     ticker: str = Field(min_length=1)
     horizon_days: int = Field(default=300, ge=1)
     window_size: int = Field(default=60, ge=2)
-    strict_validation: bool = False
+    strict_validation: bool = True
 
 
 class TickerForecastResponse(BaseModel):
@@ -55,6 +69,9 @@ class TickerForecastResponse(BaseModel):
     return_estimator: dict[str, Any]
     literacy: dict[str, str]
     plain_language: str
+    data_as_of: str | None = None
+    source: str | None = None
+    snapshot_used: bool | None = None
 
 
 class MarketForecastRequest(BaseModel):
@@ -62,7 +79,7 @@ class MarketForecastRequest(BaseModel):
     risk: float = Field(default=0.5, ge=0.0, le=1.0)
     top_n: int = Field(default=10, ge=1, le=50)
     window_size: int = Field(default=60, ge=2)
-    strict_validation: bool = False
+    strict_validation: bool = True
 
 
 class MarketForecastResponse(BaseModel):
@@ -72,6 +89,14 @@ class MarketForecastResponse(BaseModel):
     highlights: dict[str, Any]
     macro_snapshot: dict[str, Any]
     disclaimer: str
+    source: str | None = None
+
+
+class MarketIndexResponse(BaseModel):
+    source: str
+    as_of_date: str | None = None
+    indices: list[dict[str, Any]]
+    disclaimer: str
 
 
 class PortfolioSimulationRequest(BaseModel):
@@ -80,7 +105,7 @@ class PortfolioSimulationRequest(BaseModel):
     horizon_days: int = Field(default=300, ge=1)
     selected_tickers: list[str] | None = None
     window_size: int = Field(default=60, ge=2)
-    strict_validation: bool = False
+    strict_validation: bool = True
 
 
 class PortfolioSimulationResponse(BaseModel):
@@ -101,7 +126,7 @@ class InferenceRequest(BaseModel):
     risk: float = Field(default=0.5, ge=0.0, le=1.0)
     duration: int = Field(default=30, ge=1)
     window_size: int = Field(default=60, ge=2)
-    strict_validation: bool = False
+    strict_validation: bool = True
 
 
 class InferenceResponse(BaseModel):
@@ -142,7 +167,7 @@ class BacktestRequest(BaseModel):
     risk: float = Field(default=0.5, ge=0.0, le=1.0)
     window_size: int = Field(default=60, ge=2)
     max_steps: int | None = Field(default=None, ge=1)
-    strict_validation: bool = False
+    strict_validation: bool = True
 
 
 class BacktestResponse(BaseModel):
@@ -151,3 +176,13 @@ class BacktestResponse(BaseModel):
     drawdown_curve: list[dict[str, Any]]
     trade_log: list[dict[str, Any]]
     warnings: list[str]
+
+
+class RefreshStatusResponse(BaseModel):
+    configured: bool
+    source: str
+    latest_run: dict[str, Any] | None = None
+    failed_items: list[dict[str, Any]]
+    stale_tickers: list[str]
+    latest_market_date: str | None = None
+    message: str | None = None

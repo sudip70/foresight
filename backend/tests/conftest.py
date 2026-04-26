@@ -3,9 +3,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.core.config import get_settings
+from backend.app.core.config import reset_settings
 from backend.app.main import create_app
-from backend.app.ml.pipeline import get_engine
+from backend.app.ml.pipeline import reset_engine
 from backend.tests.helpers import build_fixture_artifact_tree
 
 
@@ -22,12 +22,11 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("STOCKIFY_TOP_ASSET_TARGET_COUNT", "2")
     monkeypatch.setenv("STOCKIFY_DEFAULT_BACKTEST_STEPS", "12")
 
-    get_settings.cache_clear()
-    get_engine.cache_clear()
+    reset_settings()
+    reset_engine()
 
     with TestClient(create_app()) as test_client:
         yield test_client
 
-    get_settings.cache_clear()
-    get_engine.cache_clear()
-
+    reset_settings()
+    reset_engine()

@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 import json
+import os
 import shutil
 import tempfile
 
@@ -99,6 +100,29 @@ class SACMetaTrainingReport:
 
 def _save_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def _stage_artifact_dir(asset_dir: Path) -> Path:
+    staging_dir = Path(
+        tempfile.mkdtemp(
+            prefix=f".{asset_dir.name}.staging.",
+            dir=str(asset_dir.parent),
+        )
+    )
+    shutil.copytree(asset_dir, staging_dir, dirs_exist_ok=True)
+    return staging_dir
+
+
+def _commit_staged_artifact_dir(staging_dir: Path, asset_dir: Path) -> Path:
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    backup_dir = asset_dir.with_name(f".{asset_dir.name}.backup_before_commit_{timestamp}")
+    os.rename(asset_dir, backup_dir)
+    try:
+        os.rename(staging_dir, asset_dir)
+    except Exception:
+        os.rename(backup_dir, asset_dir)
+        raise
+    return backup_dir
 
 
 def _common_date_positions(dates: np.ndarray, common_dates: np.ndarray) -> np.ndarray:
@@ -202,7 +226,7 @@ def _transform_macro_block(
 
 def _build_context(artifact_root: Path, config: SACMetaTrainingConfig) -> dict:
     assets = {
-        asset_class: load_asset_artifacts(artifact_root, asset_class, strict=False)
+        asset_class: load_asset_artifacts(artifact_root, asset_class, strict=True)
         for asset_class in ASSET_CLASSES
     }
     date_arrays = [np.asarray(bundle.dates) for bundle in assets.values()]
@@ -835,15 +859,18 @@ def train_meta_agent(
 
     meta_dir = artifact_root / "meta"
     meta_dir.mkdir(parents=True, exist_ok=True)
-    model_path = meta_dir / "model.zip"
+    staging_meta_dir = _stage_artifact_dir(meta_dir)
+    final_model_path = meta_dir / "model.zip"
+    staging_model_path = staging_meta_dir / "model.zip"
     backup_path = None
-    if model_path.exists():
-        backup_path = meta_dir / (
+    if final_model_path.exists():
+        backup_name = (
             f"model.backup_before_sac_retrain_{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.zip"
         )
-        shutil.copy2(model_path, backup_path)
-    trained_model.save(model_path)
-    joblib.dump(macro_scaler, meta_dir / "meta_macro_scaler.pkl")
+        backup_path = meta_dir / backup_name
+        shutil.copy2(final_model_path, staging_meta_dir / backup_name)
+    trained_model.save(staging_model_path)
+    joblib.dump(macro_scaler, staging_meta_dir / "meta_macro_scaler.pkl")
 
     obs_dim = meta_observation_dim(
         n_assets=context["prices"].shape[1],
@@ -908,7 +935,7 @@ def train_meta_agent(
         },
         **evaluation,
     }
-    _save_json(meta_dir / "metadata.json", metadata)
+    _save_json(staging_meta_dir / "metadata.json", metadata)
 
     report = SACMetaTrainingReport(
         total_timesteps=config.total_timesteps,
@@ -919,9 +946,10 @@ def train_meta_agent(
         eval_mean_sharpe=evaluation["eval_mean_sharpe"],
         eval_mean_max_drawdown=evaluation["eval_mean_max_drawdown"],
         eval_mean_agent_alpha=evaluation["eval_mean_agent_alpha"],
-        model_path=str(model_path),
+        model_path=str(final_model_path),
         backup_path=str(backup_path) if backup_path is not None else None,
         trained_at=datetime.now(UTC).isoformat(),
     )
-    _save_json(meta_dir / "training_summary.json", asdict(report))
+    _save_json(staging_meta_dir / "training_summary.json", asdict(report))
+    _commit_staged_artifact_dir(staging_meta_dir, meta_dir)
     return report

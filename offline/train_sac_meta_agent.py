@@ -22,7 +22,7 @@ def _parse_risk_values(value: str) -> tuple[float, ...]:
 
 
 def build_parser() -> ArgumentParser:
-    parser = ArgumentParser(description="Retrain Stockify SAC meta-allocation agent.")
+    parser = ArgumentParser(description="Retrain Foresight SAC meta-allocation agent.")
     parser.add_argument(
         "--artifact-root",
         default=str(REPO_ROOT / "artifacts" / "processed"),

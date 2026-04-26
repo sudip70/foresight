@@ -1,1 +1,1 @@
-"""Offline data and artifact preparation tools for Stockify."""
+"""Offline data and artifact preparation tools for Foresight."""

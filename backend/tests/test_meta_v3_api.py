@@ -1,21 +1,21 @@
 from fastapi.testclient import TestClient
 
-from backend.app.core.config import get_settings
+from backend.app.core.config import reset_settings
 from backend.app.main import create_app
-from backend.app.ml.pipeline import get_engine
-from backend.tests.helpers import build_v3_fixture_artifact_tree
+from backend.app.ml.pipeline import reset_engine
+from backend.tests.helpers import build_fixture_artifact_tree
 
 
 def test_v3_models_endpoint_reports_shared_macro_architecture(tmp_path, monkeypatch):
-    artifact_root = build_v3_fixture_artifact_tree(tmp_path)
+    artifact_root = build_fixture_artifact_tree(tmp_path, version="v3")
     dataset_root = tmp_path / "datasets"
     dataset_root.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
     monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
 
-    get_settings.cache_clear()
-    get_engine.cache_clear()
+    reset_settings()
+    reset_engine()
 
     with TestClient(create_app()) as client:
         response = client.get("/api/models")
@@ -29,7 +29,7 @@ def test_v3_models_endpoint_reports_shared_macro_architecture(tmp_path, monkeypa
 
 
 def test_v3_inference_uses_global_macro_snapshot_and_cash_aware_sub_agents(tmp_path, monkeypatch):
-    artifact_root = build_v3_fixture_artifact_tree(tmp_path)
+    artifact_root = build_fixture_artifact_tree(tmp_path, version="v3")
     dataset_root = tmp_path / "datasets"
     dataset_root.mkdir(parents=True, exist_ok=True)
 
@@ -37,8 +37,8 @@ def test_v3_inference_uses_global_macro_snapshot_and_cash_aware_sub_agents(tmp_p
     monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
     monkeypatch.setenv("STOCKIFY_TOP_ASSET_TARGET_COUNT", "2")
 
-    get_settings.cache_clear()
-    get_engine.cache_clear()
+    reset_settings()
+    reset_engine()
 
     with TestClient(create_app()) as client:
         response = client.post(
