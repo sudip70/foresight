@@ -16,6 +16,25 @@ class PolicyLoadError(RuntimeError):
     """Raised when a policy bundle cannot be loaded."""
 
 
+@dataclass(frozen=True)
+class CashOverlayParams:
+    """Scale factors convert daily return/volatility gaps into cash allocation pressure."""
+
+    target_return_risk_neutral_scale: float = 170.0
+    target_return_risk_scale_reduction: float = 40.0
+    risky_mean_carry_risk_neutral_scale: float = 620.0
+    risky_mean_carry_risk_scale_reduction: float = 180.0
+    risky_median_carry_risk_neutral_scale: float = 420.0
+    risky_median_carry_risk_scale_reduction: float = 120.0
+    volatility_risk_neutral_scale: float = 8.0
+    volatility_risk_scale_reduction: float = 2.0
+    positive_return_relief_base_scale: float = 180.0
+    positive_return_relief_risk_scale: float = 140.0
+
+
+DEFAULT_CASH_OVERLAY_PARAMS = CashOverlayParams()
+
+
 def normalize_weights(weights: np.ndarray, *, max_weight: float | None = None) -> np.ndarray:
     clipped = np.clip(np.asarray(weights, dtype=float).reshape(-1), 0.0, None)
     total = clipped.sum()
@@ -147,6 +166,7 @@ def apply_cash_risk_managed_overlay(
     risk_appetite: float,
     cash_prior: float | None = None,
     target_return: float = 0.0,
+    params: CashOverlayParams = DEFAULT_CASH_OVERLAY_PARAMS,
 ) -> tuple[np.ndarray, dict | None]:
     adjusted = normalize_weights(weights)
     mu = np.asarray(expected_returns, dtype=float).reshape(-1)
@@ -180,37 +200,62 @@ def apply_cash_risk_managed_overlay(
             float(np.clip(cash_prior, 0.0, 1.0)) * (0.30 + (0.20 * (1.0 - risk_value))),
         )
 
-    expected_pressure = np.clip(
-        (effective_target_return - current_expected) * (170.0 - (40.0 * risk_value)),
+    expected_return_gap = effective_target_return - current_expected
+    expected_return_pressure_scale = (
+        params.target_return_risk_neutral_scale
+        - (params.target_return_risk_scale_reduction * risk_value)
+    )
+    expected_return_pressure = np.clip(
+        expected_return_gap * expected_return_pressure_scale,
         0.0,
         0.22,
     )
-    breadth_pressure = np.clip((0.55 - positive_share) * 0.35, 0.0, 0.12)
+    breadth_gap = 0.55 - positive_share
+    breadth_pressure = np.clip(breadth_gap * 0.35, 0.0, 0.12)
+    risky_mean_carry_gap = cash_return - risky_mean_return
+    risky_mean_carry_pressure_scale = (
+        params.risky_mean_carry_risk_neutral_scale
+        - (params.risky_mean_carry_risk_scale_reduction * risk_value)
+    )
     carry_pressure = np.clip(
-        (cash_return - risky_mean_return) * (620.0 - (180.0 * risk_value)),
+        risky_mean_carry_gap * risky_mean_carry_pressure_scale,
         0.0,
         0.32,
     )
+    risky_median_carry_gap = cash_return - risky_median_return
+    risky_median_carry_pressure_scale = (
+        params.risky_median_carry_risk_neutral_scale
+        - (params.risky_median_carry_risk_scale_reduction * risk_value)
+    )
     median_pressure = np.clip(
-        (cash_return - risky_median_return) * (420.0 - (120.0 * risk_value)),
+        risky_median_carry_gap * risky_median_carry_pressure_scale,
         0.0,
         0.18,
     )
     target_volatility = 0.007 + (0.013 * risk_value)
+    volatility_gap = current_volatility - target_volatility
+    volatility_pressure_scale = (
+        params.volatility_risk_neutral_scale
+        - (params.volatility_risk_scale_reduction * risk_value)
+    )
     volatility_pressure = np.clip(
-        (current_volatility - target_volatility) * (8.0 - (2.0 * risk_value)),
+        volatility_gap * volatility_pressure_scale,
         0.0,
         0.12,
     )
+    positive_return_relief_scale = (
+        params.positive_return_relief_base_scale
+        + (params.positive_return_relief_risk_scale * risk_value)
+    )
     positive_relief = np.clip(
         max(current_expected - max(effective_target_return, -0.00045), 0.0)
-        * (180.0 + (140.0 * risk_value)),
+        * positive_return_relief_scale,
         0.0,
         0.20,
     )
     target_cash = np.clip(
         base_cash_target
-        + expected_pressure
+        + expected_return_pressure
         + breadth_pressure
         + carry_pressure
         + median_pressure
@@ -258,6 +303,12 @@ def apply_cash_risk_managed_overlay(
         "cash_daily_return": cash_return,
         "risky_mean_daily_return": risky_mean_return,
         "risky_median_daily_return": risky_median_return,
+        "expected_return_pressure": float(expected_return_pressure),
+        "breadth_pressure": float(breadth_pressure),
+        "carry_pressure": float(carry_pressure),
+        "median_pressure": float(median_pressure),
+        "volatility_pressure": float(volatility_pressure),
+        "positive_return_relief": float(positive_relief),
         "cash_weight_before": cash_weight,
         "cash_weight_after": float(next_weights[cash_index]),
         "cash_target": float(target_cash),

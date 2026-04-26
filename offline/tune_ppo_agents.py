@@ -140,7 +140,7 @@ def _evaluate_trial(asset_dir: Path, asset_class: str, config: PPOTrainingConfig
 
 
 def build_parser() -> ArgumentParser:
-    parser = ArgumentParser(description="Random-search tuning for Stockify PPO sub-agents.")
+    parser = ArgumentParser(description="Random-search tuning for Foresight PPO sub-agents.")
     parser.add_argument(
         "--asset-class",
         action="append",

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from backend.tests.helpers import build_v3_fixture_artifact_tree
+from backend.tests.helpers import build_fixture_artifact_tree
 from offline.sac_training import SACMetaPortfolioEnv, SACMetaTrainingConfig, _build_context
 
 
 def test_sac_meta_env_uses_sleeve_action_space(tmp_path):
-    artifact_root = build_v3_fixture_artifact_tree(tmp_path, rows=80)
+    artifact_root = build_fixture_artifact_tree(tmp_path, version="v3", rows=80)
     config = SACMetaTrainingConfig(
         episode_length=12,
         window_size=5,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
 import importlib.util
 import math
 
@@ -92,6 +93,29 @@ class RuntimeBundle:
     meta: MetaArtifacts
 
 
+@dataclass(frozen=True)
+class ArtifactStore:
+    settings: Settings
+    strict_validation: bool = True
+
+    def load_assets(self) -> dict[str, AssetArtifacts]:
+        return {
+            asset_class: load_asset_artifacts(
+                self.settings.artifact_root,
+                asset_class,
+                strict=self.strict_validation,
+            )
+            for asset_class in ASSET_CLASSES
+        }
+
+    def load_meta(self, *, observation_dim: int, action_dim: int) -> MetaArtifacts:
+        return load_meta_artifacts(
+            self.settings.artifact_root,
+            observation_dim=observation_dim,
+            action_dim=action_dim,
+        )
+
+
 def _dependency_installed(module_name: str) -> bool:
     return importlib.util.find_spec(module_name) is not None
 
@@ -156,28 +180,23 @@ class StockifyEngine:
         transformed = scaler.transform(matrix)
         return np.nan_to_num(transformed, nan=0.0, posinf=0.0, neginf=0.0).astype(float)
 
-    def __init__(self, settings: Settings, *, strict_validation: bool = False) -> None:
+    def __init__(self, settings: Settings, *, strict_validation: bool = True) -> None:
         self.settings = settings
         self.strict_validation = strict_validation
         self._meta_metadata_hint = peek_meta_metadata(settings.artifact_root)
-        assets = {
-            asset_class: load_asset_artifacts(
-                settings.artifact_root, asset_class, strict=strict_validation
-            )
-            for asset_class in ASSET_CLASSES
-        }
-        self._combined_context = self._build_combined_context(assets)
+        self.artifact_store = ArtifactStore(settings, strict_validation=strict_validation)
+        assets = self.artifact_store.load_assets()
+        combined_context = self._build_combined_context(assets)
         total_assets = sum(len(bundle.tickers) for bundle in assets.values()) + (
             1 if settings.meta_cash_enabled else 0
         )
         meta_obs_dim = meta_observation_dim(
             n_assets=total_assets,
-            micro_dim=int(self._combined_context["combined_micro"].shape[1]),
-            macro_dim=self._meta_macro_dim(self._combined_context),
+            micro_dim=int(combined_context["combined_micro"].shape[1]),
+            macro_dim=self._meta_macro_dim(combined_context),
             class_feature_dim=self._meta_class_feature_dim(),
         )
-        meta = load_meta_artifacts(
-            settings.artifact_root,
+        meta = self.artifact_store.load_meta(
             observation_dim=meta_obs_dim,
             action_dim=int(
                 self._meta_metadata_hint.get("action_dim", total_assets)
@@ -187,8 +206,11 @@ class StockifyEngine:
             ),
         )
         self.runtime = RuntimeBundle(assets=assets, meta=meta)
-        self._combined_context["combined_macro"] = self._resolve_meta_macro_matrix(
-            self._combined_context
+        self._combined_context = MappingProxyType(
+            {
+                **combined_context,
+                "combined_macro": self._resolve_meta_macro_matrix(combined_context),
+            }
         )
         self._single_agent_signal_policies = {
             asset_class: SingleAgentSignalPolicy(
@@ -574,8 +596,14 @@ class StockifyEngine:
             residuals = recent_returns - float(np.mean(recent_returns))
             if float(np.std(residuals)) > 1e-12 and daily_volatility > 1e-12:
                 residuals = residuals * (daily_volatility / float(np.std(residuals)))
-            repeats = int(math.ceil(horizon / max(residuals.shape[0], 1)))
-            residuals = np.tile(residuals, repeats)[:horizon]
+            seed = (
+                int(abs(float(latest_price)) * 10_000)
+                ^ (horizon * 1_000_003)
+                ^ int((float(z_score) + 3.0) * 100_000)
+                ^ int(np.datetime64(latest_date, "D").astype(int))
+            )
+            rng = np.random.default_rng(seed)
+            residuals = rng.choice(residuals, size=horizon, replace=True)
 
         cumulative_noise = np.concatenate(
             [np.array([0.0], dtype=float), np.cumsum(residuals)]
@@ -1156,15 +1184,17 @@ class StockifyEngine:
         step: int,
         risk: float,
         prev_weights: np.ndarray | None,
+        env: SingleAgentEnv | None = None,
     ) -> dict:
-        env = SingleAgentEnv(
-            prices=asset_context["prices"],
-            ohlcv=asset_context["ohlcv"],
-            regimes=asset_context["regimes"],
-            micro_indicators=asset_context["micro"],
-            macro_indicators=asset_context["macro"],
-            risk_appetite=risk,
-        )
+        if env is None:
+            env = SingleAgentEnv(
+                prices=asset_context["prices"],
+                ohlcv=asset_context["ohlcv"],
+                regimes=asset_context["regimes"],
+                micro_indicators=asset_context["micro"],
+                macro_indicators=asset_context["macro"],
+                risk_appetite=risk,
+            )
         observation = env.observation_at(step, prev_weights=prev_weights)
         learned_weights = np.asarray(bundle.policy.predict(observation), dtype=float)
         signal_weights = np.asarray(
@@ -1188,6 +1218,19 @@ class StockifyEngine:
             "weights": risky_weights,
             "cash_weight": cash_weight,
             "signal_blend": float(blend),
+        }
+
+    def _build_single_agent_envs(self, *, risk: float) -> dict[str, SingleAgentEnv]:
+        return {
+            asset_class: SingleAgentEnv(
+                prices=self._combined_context["assets"][asset_class]["prices"],
+                ohlcv=self._combined_context["assets"][asset_class]["ohlcv"],
+                regimes=self._combined_context["assets"][asset_class]["regimes"],
+                micro_indicators=self._combined_context["assets"][asset_class]["micro"],
+                macro_indicators=self._combined_context["assets"][asset_class]["macro"],
+                risk_appetite=risk,
+            )
+            for asset_class in ASSET_CLASSES
         }
 
     def _compose_meta_sub_agent_signal(self, asset_outputs: dict[str, dict]) -> np.ndarray:
@@ -1559,6 +1602,7 @@ class StockifyEngine:
         window_size: int,
         prev_weights: np.ndarray | None,
         prev_sub_weights: dict[str, np.ndarray] | None = None,
+        single_agent_envs: dict[str, SingleAgentEnv] | None = None,
     ) -> dict:
         asset_outputs = {}
         mu_blocks = []
@@ -1577,6 +1621,7 @@ class StockifyEngine:
                 step=step,
                 risk=risk,
                 prev_weights=sub_prev_weights,
+                env=single_agent_envs.get(asset_class) if single_agent_envs else None,
             )
             mu, cov = self._compute_mu_cov(asset_context["risky_prices"], window_size, step)
             projection_mu, projection_cov, projection_details = self._compute_projection_mu_cov(
@@ -1971,6 +2016,7 @@ class StockifyEngine:
         turnover_history: list[float] = []
         transaction_cost_history: list[float] = []
         trade_log: list[dict] = []
+        single_agent_envs = self._build_single_agent_envs(risk=risk)
 
         for offset, step in enumerate(range(start_step, start_step + steps_to_run), start=1):
             scenario = self._build_step_scenario(
@@ -1979,6 +2025,7 @@ class StockifyEngine:
                 window_size=window_size,
                 prev_weights=prev_weights,
                 prev_sub_weights=prev_sub_weights,
+                single_agent_envs=single_agent_envs,
             )
             raw_weights, _ = self._predict_mixed_policy_weights(
                 scenario,
@@ -1998,17 +2045,21 @@ class StockifyEngine:
             )
             if risk_adjustment is not None:
                 risk_off_applied_steps += 1
-            previous_weights = (
-                scenario["prev_weights"] if prev_weights is None else prev_weights
-            )
+            if prev_weights is None:
+                cash_index = self._cash_index()
+                if cash_index is None:
+                    previous_weights = scenario["prev_weights"]
+                else:
+                    previous_weights = np.zeros_like(weights, dtype=float)
+                    previous_weights[cash_index] = 1.0
+            else:
+                previous_weights = prev_weights
             weights = constrain_turnover(
                 weights,
                 previous_weights,
                 max_turnover=self._max_meta_turnover(risk),
             )
-            trade_previous_weights = (
-                np.zeros_like(weights, dtype=float) if prev_weights is None else previous_weights
-            )
+            trade_previous_weights = previous_weights
             turnover = float(np.sum(np.abs(weights - previous_weights)))
             transaction_cost = turnover * transaction_fee
             trade_log.extend(
@@ -2107,39 +2158,9 @@ class StockifyEngine:
 
 
 @lru_cache(maxsize=4)
-def get_engine(
-    artifact_root: str,
-    dataset_root: str,
-    strict_validation: bool,
-    surrogate_sample_size: int,
-    surrogate_fidelity_threshold: float,
-    top_asset_target_count: int,
-    default_backtest_steps: int,
-    meta_max_asset_weight: float,
-    meta_max_stock_weight: float,
-    meta_max_crypto_weight: float,
-    meta_max_etf_weight: float,
-    meta_max_cash_weight: float,
-    meta_min_expected_daily_return: float,
-    meta_cash_enabled: bool,
-    meta_cash_annual_return: float,
-) -> StockifyEngine:
-    settings = Settings(
-        project_name="Stockify Backend",
-        api_prefix="/api",
-        artifact_root=Path(artifact_root),
-        dataset_root=Path(dataset_root),
-        surrogate_sample_size=surrogate_sample_size,
-        surrogate_fidelity_threshold=surrogate_fidelity_threshold,
-        top_asset_target_count=top_asset_target_count,
-        default_backtest_steps=default_backtest_steps,
-        meta_max_asset_weight=meta_max_asset_weight,
-        meta_max_stock_weight=meta_max_stock_weight,
-        meta_max_crypto_weight=meta_max_crypto_weight,
-        meta_max_etf_weight=meta_max_etf_weight,
-        meta_max_cash_weight=meta_max_cash_weight,
-        meta_min_expected_daily_return=meta_min_expected_daily_return,
-        meta_cash_enabled=meta_cash_enabled,
-        meta_cash_annual_return=meta_cash_annual_return,
-    )
+def get_engine(settings: Settings, *, strict_validation: bool = True) -> StockifyEngine:
     return StockifyEngine(settings, strict_validation=strict_validation)
+
+
+def reset_engine() -> None:
+    get_engine.cache_clear()

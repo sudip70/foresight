@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Stockify</title>
+    <title>Foresight</title>
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   </head>
@@ -11,7 +11,7 @@
     <header class="hero">
       <div>
         <p class="eyebrow">Market Intelligence + Portfolio Simulation</p>
-        <h1>Stockify</h1>
+        <h1>Foresight</h1>
         <p class="lede">
           Ticker-level bear, base, and bull scenarios with risk-aware portfolio simulation.
         </p>
@@ -70,6 +70,7 @@
             <p class="muted">Ranked scenarios across the current stock, crypto, and ETF universe.</p>
           </div>
         </div>
+        <div id="marketIndices" class="index-strip"></div>
         <div id="marketHighlights" class="metric-grid"></div>
         <div class="grid two">
           <article class="surface">
@@ -103,6 +104,8 @@
           <article class="surface">
             <h3>Scenario Metrics</h3>
             <div id="tickerMetrics" class="metric-grid compact"></div>
+            <h3>Company Data</h3>
+            <div id="tickerProfile" class="profile-grid"></div>
             <div id="tickerNarrative" class="narrative"></div>
           </article>
         </div>
@@ -120,7 +123,7 @@
           <article class="surface">
             <h3>Optional Ticker Selection</h3>
             <select id="simulationTickers" multiple size="8"></select>
-            <p class="muted">Leave blank to let Stockify use the top-ranked forecast opportunities.</p>
+            <p class="muted">Leave blank to let Foresight use the top-ranked forecast opportunities.</p>
           </article>
           <article class="surface">
             <h3>Portfolio Scenario</h3>
@@ -173,6 +176,10 @@
           <article class="surface">
             <h3>Model Metadata</h3>
             <pre id="modelsBlock" class="json-block"></pre>
+          </article>
+          <article class="surface">
+            <h3>Data Refresh Status</h3>
+            <pre id="refreshStatusBlock" class="json-block"></pre>
           </article>
         </div>
       </details>

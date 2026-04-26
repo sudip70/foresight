@@ -1,6 +1,6 @@
-# Stockify
+# Foresight
 
-Stockify is a split web application for RL-driven portfolio allocation and model explainability.
+Foresight is a split web application for ticker intelligence, scenario forecasting, portfolio simulation, and model explainability.
 
 The live inference stack now uses a horizon-based hybrid allocator: learned PPO/SAC artifacts are still loaded, weak policies are blended with deterministic signal experts, and a final sleeve allocator balances projected horizon return against diversification, concentration, class caps, and risk-based cash limits.
 
@@ -37,7 +37,6 @@ Phase 1 does not include:
 - LLM or sentiment ingestion
 - live trading execution
 - backend-managed retraining jobs
-- backend-managed market-data refresh jobs
 
 ## Local Setup
 
@@ -94,6 +93,36 @@ This writes:
 - updated metadata describing the source date range and feature version
 
 By default the script reuses the existing scaler pickle files so the current RL artifacts remain as compatible as possible. If you are rebuilding for retraining rather than refreshing live inputs, use `--fit-new-scalers`.
+
+## Supabase Market Data
+
+Foresight can now use Supabase as the source of truth for ticker intelligence, company profile metrics, market index snapshots, OHLCV history, refresh logs, and stored forecast snapshots. The local `.npy` artifacts still power the experimental RL diagnostics unless those models are retrained for a larger universe.
+
+1. Apply the migrations in `supabase/migrations/` to your Supabase project.
+2. Set backend/job secrets:
+
+```bash
+export SUPABASE_URL="https://your-project-ref.supabase.co"
+export SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+export STOCKIFY_MARKET_DATA_PROVIDER="yfinance"
+```
+
+3. Seed or refresh the expanded universe:
+
+```bash
+source .venv/bin/activate
+python offline/supabase_refresh.py --mode full
+```
+
+4. For daily updates, run the incremental job after market close:
+
+```bash
+python offline/supabase_refresh.py --mode incremental --lookback-days 10
+```
+
+The job is idempotent: it upserts `asset_universe`, `market_ohlcv_daily`, `asset_profile_snapshots`, `macro_observations`, `market_index_snapshots`, `forecast_snapshots`, and refresh run logs. It precomputes default forecast horizons of 30, 90, 180, and 300 days. The included GitHub Actions workflow `.github/workflows/daily-market-refresh.yml` runs the incremental refresh at 23:00 UTC Monday-Friday when Supabase secrets are configured.
+
+The FastAPI app prefers Supabase-backed market data when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present. If they are absent, it falls back to the current artifact-backed dashboard.
 
 ## PPO Retraining
 

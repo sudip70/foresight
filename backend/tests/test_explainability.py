@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
-from backend.app.core.config import get_settings
+from backend.app.core.config import reset_settings
 from backend.app.main import create_app
-from backend.app.ml.pipeline import get_engine
+from backend.app.ml.pipeline import reset_engine
 from backend.tests.helpers import build_fixture_artifact_tree
 
 
@@ -16,8 +16,8 @@ def test_explanations_return_unavailable_when_threshold_is_too_high(tmp_path, mo
     monkeypatch.setenv("STOCKIFY_SURROGATE_SAMPLE_SIZE", "24")
     monkeypatch.setenv("STOCKIFY_SURROGATE_FIDELITY_THRESHOLD", "1.1")
 
-    get_settings.cache_clear()
-    get_engine.cache_clear()
+    reset_settings()
+    reset_engine()
 
     with TestClient(create_app()) as client:
         response = client.post(

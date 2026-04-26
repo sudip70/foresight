@@ -1,3 +1,12 @@
+import pytest
+from fastapi.testclient import TestClient
+
+from backend.app.core.config import reset_settings
+from backend.app.main import create_app
+from backend.app.ml.pipeline import reset_engine
+from backend.tests.helpers import build_fixture_artifact_tree
+
+
 def test_health_endpoint_returns_dependency_and_artifact_status(client):
     response = client.get("/api/health")
     assert response.status_code == 200
@@ -147,3 +156,47 @@ def test_backtests_endpoint_returns_curves_and_metrics(client):
     assert len(payload["equity_curve"]) == 9
     assert len(payload["drawdown_curve"]) == 9
     assert payload["trade_log"]
+
+
+def test_backtest_trade_log_matches_reported_turnover(client):
+    response = client.post(
+        "/api/backtests",
+        json={"initial_amount": 10000, "risk": 0.5, "window_size": 5, "max_steps": 8},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+
+    logged_turnover = sum(
+        trade["amount"] / trade["portfolio_value_before"]
+        for trade in payload["trade_log"]
+        if trade["portfolio_value_before"] > 0
+    )
+    reported_turnover = (
+        payload["summary_metrics"]["average_daily_turnover"]
+        * payload["summary_metrics"]["backtest_steps"]
+    )
+
+    assert logged_turnover == pytest.approx(reported_turnover, rel=0.15, abs=1e-3)
+
+
+def test_corrupted_artifacts_return_degraded_health_and_503(tmp_path, monkeypatch):
+    artifact_root = build_fixture_artifact_tree(tmp_path)
+    (artifact_root / "stock" / "prices.npy").unlink()
+    dataset_root = tmp_path / "datasets"
+    dataset_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
+    reset_settings()
+    reset_engine()
+
+    with TestClient(create_app()) as degraded_client:
+        health = degraded_client.get("/api/health")
+        assert health.status_code == 200
+        assert health.json()["status"] == "degraded"
+
+        response = degraded_client.get("/api/universe")
+        assert response.status_code == 503
+
+    reset_settings()
+    reset_engine()
