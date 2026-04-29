@@ -8,16 +8,30 @@ const elements = {
   horizon: document.querySelector("#horizon"),
   windowSize: document.querySelector("#windowSize"),
   refreshDashboard: document.querySelector("#refreshDashboard"),
+  marketAsOf: document.querySelector("#marketAsOf"),
   marketIndices: document.querySelector("#marketIndices"),
   marketHighlights: document.querySelector("#marketHighlights"),
   macroSnapshot: document.querySelector("#macroSnapshot"),
   marketTable: document.querySelector("#marketTable"),
+  sentimentGaugeArc: document.querySelector("#sentimentGaugeArc"),
+  sentimentScore: document.querySelector("#sentimentScore"),
+  sentimentLabel: document.querySelector("#sentimentLabel"),
+  sentimentReasons: document.querySelector("#sentimentReasons"),
+  marketInsightList: document.querySelector("#marketInsightList"),
+  topOpportunities: document.querySelector("#topOpportunities"),
+  dataHealthCards: document.querySelector("#dataHealthCards"),
   tickerSelect: document.querySelector("#tickerSelect"),
   runTickerForecast: document.querySelector("#runTickerForecast"),
+  forecastDateRange: document.querySelector("#forecastDateRange"),
   forecastChart: document.querySelector("#forecastChart"),
   chartFallback: document.querySelector("#chartFallback"),
+  tickerMetricTitle: document.querySelector("#tickerMetricTitle"),
   tickerMetrics: document.querySelector("#tickerMetrics"),
+  scenarioHorizonLabel: document.querySelector("#scenarioHorizonLabel"),
+  scenarioPathSummary: document.querySelector("#scenarioPathSummary"),
+  tickerInsights: document.querySelector("#tickerInsights"),
   tickerProfile: document.querySelector("#tickerProfile"),
+  tickerAboutTitle: document.querySelector("#tickerAboutTitle"),
   tickerNarrative: document.querySelector("#tickerNarrative"),
   simulationTickers: document.querySelector("#simulationTickers"),
   runSimulation: document.querySelector("#runSimulation"),
@@ -35,6 +49,7 @@ const elements = {
   healthBlock: document.querySelector("#healthBlock"),
   modelsBlock: document.querySelector("#modelsBlock"),
   refreshStatusBlock: document.querySelector("#refreshStatusBlock"),
+  footerDataAsOf: document.querySelector("#footerDataAsOf"),
 };
 
 const state = {
@@ -43,7 +58,14 @@ const state = {
     localStorage.getItem("stockify-api-base") ||
     "http://localhost:8000",
   universe: null,
+  health: null,
+  models: null,
+  refreshStatus: null,
+  simulation: null,
+  backtest: null,
   chart: null,
+  chartRange: "6m",
+  currentForecast: null,
   controllers: {},
 };
 
@@ -110,12 +132,88 @@ function formatLargeNumber(value) {
   }).format(Number(value));
 }
 
-function metricCard(label, value, tooltip) {
+function formatDate(value) {
+  if (!value) return "Unavailable";
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? `${value}T00:00:00` : value;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(parsed);
+}
+
+function formatDateTime(value) {
+  if (!value) return "Unavailable";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+    return formatDate(value);
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed);
+}
+
+function formatInteger(value) {
+  if (isMissing(value)) return "--";
+  return new Intl.NumberFormat("en-US").format(Number(value));
+}
+
+function classCoverageLabel(universe) {
+  const groups = universe?.asset_classes || [];
+  if (!groups.length) return "assets tracked";
+  return groups
+    .map((group) => `${formatInteger(group.tickers?.length || 0)} ${group.asset_class}`)
+    .join(" / ");
+}
+
+function hasProfileValue(value) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim() !== "";
+  if (typeof value === "number") return Number.isFinite(value);
+  return true;
+}
+
+function signedPercentLabel(value) {
+  if (isMissing(value)) return "Unavailable";
+  const parsed = Number(value);
+  return `${parsed >= 0 ? "+" : ""}${formatPercent(parsed)}`;
+}
+
+function toneForValue(value) {
+  return Number(value || 0) >= 0 ? "positive" : "negative";
+}
+
+function sparklineSvg(change) {
+  const positive = Number(change || 0) >= 0;
+  const path = positive
+    ? "M2 56 L10 50 L18 54 L27 39 L36 34 L45 38 L54 31 L63 36 L72 28 L81 22 L90 12 L102 6"
+    : "M2 18 L11 16 L20 21 L29 18 L38 26 L47 24 L56 31 L65 33 L74 38 L83 40 L92 48 L102 55";
+  return `
+    <svg class="sparkline" viewBox="0 0 104 64" aria-hidden="true">
+      <path class="${positive ? "positive-line" : "negative-line"}" d="${path}" />
+    </svg>
+  `;
+}
+
+function insight(message, tone = "info") {
+  return `<article class="insight ${tone}"><span>${message}</span></article>`;
+}
+
+function metricCard(label, value, tooltip, subtitle = "") {
   const tip = tooltip ? `<span class="term" title="${tooltip}">?</span>` : "";
+  const detail = subtitle ? `<span class="metric-subtitle">${subtitle}</span>` : "";
   return `
     <article class="metric">
       <h3>${label} ${tip}</h3>
       <strong>${value}</strong>
+      ${detail}
     </article>
   `;
 }
@@ -215,18 +313,25 @@ function renderMacro(snapshot) {
   const regimeLabel = ["Bull", "Normal", "Bear"][snapshot.global_regime] || "Normal";
   const regime = document.createElement("div");
   regime.className = "row two-column";
-  regime.innerHTML = `<strong>Detected regime</strong><span>${regimeLabel}</span>`;
+  regime.innerHTML = `<span>Market regime</span><strong class="pill">${regimeLabel}</strong>`;
   elements.macroSnapshot.appendChild(regime);
 
   snapshot.macro.slice(0, 6).forEach((entry) => {
     const row = document.createElement("div");
     row.className = "row two-column";
     row.innerHTML = `
-      <strong>${entry.name}</strong>
-      <span>${formatNumber(entry.value, 4)}</span>
+      <span>${entry.name}</span>
+      <strong>${formatNumber(entry.value, 2)}</strong>
     `;
     elements.macroSnapshot.appendChild(row);
   });
+  elements.macroSnapshot.insertAdjacentHTML(
+    "beforeend",
+    `<div class="info-note">
+      <strong>What is the market regime?</strong>
+      <span>The model classifies current conditions as Normal, Bull, or Bear using macro and volatility signals.</span>
+    </div>`,
+  );
 }
 
 function compactForecast(entry) {
@@ -250,46 +355,137 @@ function renderMarketIndices(result) {
   elements.marketIndices.innerHTML = indices
     .map((entry) => {
       const change = Number(entry.change || 0);
-      const tone = change >= 0 ? "positive" : "negative";
+      const tone = toneForValue(change);
       return `
         <article class="index-card">
           <div>
             <span>${entry.label || entry.symbol}</span>
             <strong>${formatIndexValue(entry.value)}</strong>
+            <div class="index-change ${tone}">
+              <span>${formatSignedNumber(entry.change)}</span>
+              <span>${formatSignedPercent(entry.change_percent)}</span>
+            </div>
+            <small>${formatDate(entry.as_of_date || result.as_of_date)}</small>
           </div>
-          <div class="index-change ${tone}">
-            <span>${formatSignedNumber(entry.change)}</span>
-            <span>${formatSignedPercent(entry.change_percent)}</span>
-          </div>
-          <small>${entry.as_of_date || result.as_of_date || "Unavailable"}</small>
+          ${sparklineSvg(change)}
         </article>
       `;
     })
     .join("");
 }
 
+function renderMarketSentiment(result) {
+  const entries = result.ranked_tickers || [];
+  const baseAverage =
+    entries.reduce((total, entry) => total + Number(entry.returns.base || 0), 0) /
+    Math.max(entries.length, 1);
+  const bearAverage =
+    entries.reduce((total, entry) => total + Number(entry.returns.bear || 0), 0) /
+    Math.max(entries.length, 1);
+  const confidenceAverage =
+    entries.reduce((total, entry) => total + Number(entry.confidence || 0), 0) /
+    Math.max(entries.length, 1);
+  const score = Math.round(
+    Math.max(0, Math.min(100, 50 + baseAverage * 90 + confidenceAverage * 18 + bearAverage * 35)),
+  );
+  const label = score >= 70 ? "Bullish" : score >= 55 ? "Moderately bullish" : score >= 45 ? "Neutral" : "Cautious";
+  elements.sentimentGaugeArc.style.setProperty("--gauge-deg", `${Math.round(score * 1.8)}deg`);
+  elements.sentimentScore.textContent = score;
+  elements.sentimentLabel.textContent = label;
+  elements.sentimentReasons.innerHTML = [
+    `Average base scenario is ${signedPercentLabel(baseAverage)} across the ranked universe.`,
+    `Average bear scenario is ${signedPercentLabel(bearAverage)}, defining downside risk.`,
+    `Model confidence averages ${formatPercent(confidenceAverage)} for this scan.`,
+  ]
+    .map((reason) => `<span>${reason}</span>`)
+    .join("");
+}
+
+function renderTopOpportunities(result) {
+  const topByBase = [...(result.ranked_tickers || [])]
+    .sort((left, right) => Number(right.returns.base || 0) - Number(left.returns.base || 0))
+    .slice(0, 5);
+  elements.topOpportunities.innerHTML = `
+    <div class="row table-head top-row">
+      <span>Ticker</span>
+      <span>Class</span>
+      <span>Base return</span>
+      <span>Confidence</span>
+    </div>
+    ${topByBase
+      .map(
+        (entry) => `
+          <div class="row top-row">
+            <strong>${entry.ticker}</strong>
+            <span>${entry.asset_class}</span>
+            <span class="${toneForValue(entry.returns.base)}">${formatPercent(entry.returns.base)}</span>
+            <span>${entry.confidence_label}</span>
+          </div>
+        `,
+      )
+      .join("")}
+  `;
+}
+
+function renderMarketInsights(result) {
+  const ranked = result.ranked_tickers || [];
+  const bestBase = result.highlights.best_base_case;
+  const stable = result.highlights.most_stable;
+  const averageVolatility =
+    ranked.reduce((total, entry) => total + Number(entry.risk_metrics.annualized_volatility || 0), 0) /
+    Math.max(ranked.length, 1);
+  const confidenceAverage =
+    ranked.reduce((total, entry) => total + Number(entry.confidence || 0), 0) /
+    Math.max(ranked.length, 1);
+  elements.marketInsightList.innerHTML = [
+    insight(
+      `Best base scenario is ${bestBase.ticker} at ${formatPercent(bestBase.returns.base)} over the next ${result.horizon_days} days.`,
+      "good",
+    ),
+    insight(
+      `Average volatility is ${formatPercent(averageVolatility)}, so scenario ranges may be wider than headline returns.`,
+      "warn",
+    ),
+    insight(
+      `Confidence is ${confidenceAverage >= 0.65 ? "high" : confidenceAverage >= 0.45 ? "medium" : "low"}. Most stable ticker in this scan is ${stable.ticker}.`,
+      "info",
+    ),
+  ].join("");
+}
+
 function renderMarket(result) {
   renderMacro(result.macro_snapshot);
+  renderMarketSentiment(result);
+  renderTopOpportunities(result);
+  renderMarketInsights(result);
+  if (elements.marketAsOf) {
+    const dateText = result.macro_snapshot?.date || state.universe?.latest_date || "";
+    elements.marketAsOf.textContent = `Live index performance and ranked opportunity scan${dateText ? ` - as of ${formatDate(dateText)}` : ""}.`;
+  }
+  if (elements.footerDataAsOf && (result.macro_snapshot?.date || state.universe?.latest_date)) {
+    elements.footerDataAsOf.textContent = `Data as of ${formatDate(result.macro_snapshot?.date || state.universe.latest_date)}`;
+  }
+
   const bestBase = compactForecast(result.highlights.best_base_case);
   const bestAdjusted = compactForecast(result.highlights.best_risk_adjusted);
   const downside = compactForecast(result.highlights.highest_downside_risk);
   const stable = compactForecast(result.highlights.most_stable);
 
   elements.marketHighlights.innerHTML = [
-    metricCard("Best base case", `${bestBase.ticker} ${bestBase.base}`, literacy.base),
-    metricCard("Best risk-adjusted", bestAdjusted.ticker, literacy.sharpe),
-    metricCard("Highest downside risk", `${downside.ticker} ${downside.bear}`, literacy.bear),
-    metricCard("Most stable", `${stable.ticker} ${stable.volatility}`, literacy.volatility),
+    metricCard("Best base case", `${bestBase.ticker} ${bestBase.base}`, literacy.base, "Highest projected base return"),
+    metricCard("Best risk-adjusted", bestAdjusted.ticker, literacy.sharpe, "Sharpe-weighted score"),
+    metricCard("Highest downside risk", `${downside.ticker} ${downside.bear}`, literacy.bear, "Bear scenario target"),
+    metricCard("Most stable", `${stable.ticker} ${stable.volatility}`, literacy.volatility, "Lowest projected volatility"),
   ].join("");
 
   elements.marketTable.innerHTML = `
     <div class="row table-head market-row">
-      <strong>Ticker</strong>
+      <span>Ticker</span>
       <span>Class</span>
       <span>Base</span>
       <span>Bear</span>
       <span>Bull</span>
-      <span>Confidence</span>
+      <span>Conf.</span>
       <span></span>
     </div>
   `;
@@ -300,9 +496,9 @@ function renderMarket(result) {
     row.innerHTML = `
       <strong>${entry.ticker}</strong>
       <span>${entry.asset_class}</span>
-      <span>${formatPercent(entry.returns.base)}</span>
-      <span>${formatPercent(entry.returns.bear)}</span>
-      <span>${formatPercent(entry.returns.bull)}</span>
+      <span class="${toneForValue(entry.returns.base)}">${formatPercent(entry.returns.base)}</span>
+      <span class="${toneForValue(entry.returns.bear)}">${formatPercent(entry.returns.bear)}</span>
+      <span class="${toneForValue(entry.returns.bull)}">${formatPercent(entry.returns.bull)}</span>
       <span>${entry.confidence_label}</span>
       <button class="small-button" data-view-ticker="${entry.ticker}">View</button>
     `;
@@ -317,6 +513,17 @@ function chartLabels(history, forecastPath) {
   ];
 }
 
+function visibleHistory(history) {
+  const rangeToPoints = {
+    "1m": 22,
+    "3m": 66,
+    "6m": 132,
+    "1y": 252,
+  };
+  const points = rangeToPoints[state.chartRange];
+  return points ? history.slice(-points) : history;
+}
+
 function forecastSeries(history, forecastPath) {
   return Array(history.length - 1)
     .fill(null)
@@ -329,12 +536,17 @@ function renderForecastChart(forecast) {
     return;
   }
   elements.chartFallback.textContent = "";
-  const history = forecast.historical_prices;
+  const history = visibleHistory(forecast.historical_prices);
   const basePath = forecast.forecast_paths.base;
   const labels = chartLabels(history, basePath);
   const historyData = history
     .map((point) => point.price)
     .concat(Array(basePath.length - 1).fill(null));
+  if (elements.forecastDateRange) {
+    const start = history[0]?.date;
+    const end = forecast.forecast_paths.base.at(-1)?.date;
+    elements.forecastDateRange.textContent = `${formatDate(start)} - ${formatDate(end)} Projection`;
+  }
 
   if (state.chart) {
     state.chart.destroy();
@@ -347,15 +559,15 @@ function renderForecastChart(forecast) {
         {
           label: "Historical",
           data: historyData,
-          borderColor: "#234c6f",
+          borderColor: "#008755",
           backgroundColor: "transparent",
           pointRadius: 0,
-          borderWidth: 2,
+          borderWidth: 3,
         },
         {
-          label: "Bear",
-          data: forecastSeries(history, forecast.forecast_paths.bear),
-          borderColor: "#a23b2a",
+          label: "Bull",
+          data: forecastSeries(history, forecast.forecast_paths.bull),
+          borderColor: "#1f66d1",
           borderDash: [6, 4],
           pointRadius: 0,
           borderWidth: 2,
@@ -363,14 +575,15 @@ function renderForecastChart(forecast) {
         {
           label: "Base",
           data: forecastSeries(history, forecast.forecast_paths.base),
-          borderColor: "#1f6b3a",
+          borderColor: "#008755",
+          borderDash: [6, 4],
           pointRadius: 0,
-          borderWidth: 3,
+          borderWidth: 2,
         },
         {
-          label: "Bull",
-          data: forecastSeries(history, forecast.forecast_paths.bull),
-          borderColor: "#9b6a14",
+          label: "Bear",
+          data: forecastSeries(history, forecast.forecast_paths.bear),
+          borderColor: "#e1192d",
           borderDash: [6, 4],
           pointRadius: 0,
           borderWidth: 2,
@@ -382,7 +595,7 @@ function renderForecastChart(forecast) {
       maintainAspectRatio: false,
       interaction: { intersect: false, mode: "index" },
       plugins: {
-        legend: { position: "bottom" },
+        legend: { display: false },
         tooltip: {
           callbacks: {
             label: (context) => `${context.dataset.label}: ${formatCurrency(context.parsed.y)}`,
@@ -390,8 +603,12 @@ function renderForecastChart(forecast) {
         },
       },
       scales: {
-        x: { ticks: { maxTicksLimit: 8 } },
+        x: {
+          grid: { color: "#edf2f7" },
+          ticks: { maxTicksLimit: 8 },
+        },
         y: {
+          grid: { color: "#edf2f7" },
           ticks: {
             callback: (value) => formatCurrency(value),
           },
@@ -402,7 +619,11 @@ function renderForecastChart(forecast) {
 }
 
 function renderTickerForecast(forecast) {
+  state.currentForecast = forecast;
   renderForecastChart(forecast);
+  elements.tickerMetricTitle.textContent = `Scenario metrics - ${forecast.ticker}`;
+  elements.tickerAboutTitle.textContent = `About ${forecast.ticker}`;
+  elements.scenarioHorizonLabel.textContent = `(${forecast.horizon_days} days)`;
   elements.tickerMetrics.innerHTML = [
     metricCard("Current price", formatCurrency(forecast.latest_price)),
     metricCard("Bear target", formatCurrency(forecast.target_prices.bear), literacy.bear),
@@ -421,15 +642,48 @@ function renderTickerForecast(forecast) {
     ),
     metricCard("Confidence", `${forecast.confidence_label} ${formatPercent(forecast.confidence)}`, literacy.confidence),
   ].join("");
+  elements.scenarioPathSummary.innerHTML = [
+    `<article class="scenario-tile bear">
+      <span>Bear scenario</span>
+      <strong>${formatCurrency(forecast.target_prices.bear)}</strong>
+      <small class="${toneForValue(forecast.returns.bear)}">${signedPercentLabel(forecast.returns.bear)}</small>
+    </article>`,
+    `<article class="scenario-tile base">
+      <span>Base scenario</span>
+      <strong>${formatCurrency(forecast.target_prices.base)}</strong>
+      <small class="${toneForValue(forecast.returns.base)}">${signedPercentLabel(forecast.returns.base)}</small>
+    </article>`,
+    `<article class="scenario-tile bull">
+      <span>Bull scenario</span>
+      <strong>${formatCurrency(forecast.target_prices.bull)}</strong>
+      <small class="${toneForValue(forecast.returns.bull)}">${signedPercentLabel(forecast.returns.bull)}</small>
+    </article>`,
+  ].join("");
+  elements.tickerInsights.innerHTML = [
+    insight(
+      `Base scenario suggests ${formatPercent(forecast.returns.base)} over the next ${forecast.horizon_days} days.`,
+      forecast.returns.base >= 0 ? "good" : "warn",
+    ),
+    insight(
+      `Volatility is ${formatPercent(forecast.risk_metrics.annualized_volatility)}, which drives wider scenario dispersion.`,
+      "warn",
+    ),
+    insight(
+      `Confidence is ${forecast.confidence_label.toLowerCase()}. Review assumptions and scenario drivers before acting.`,
+      "info",
+    ),
+  ].join("");
   elements.tickerNarrative.innerHTML = `
-    <strong>${forecast.ticker}</strong>
     <p>${forecast.plain_language}</p>
     <p class="muted">${forecast.literacy.bear_base_bull}</p>
     <div class="freshness-list">
-      <span>Market data as of ${forecast.data_as_of || forecast.latest_date || "Unavailable"}</span>
+      <span>Market data as of ${formatDate(forecast.data_as_of || forecast.latest_date)}</span>
       <span>Forecast source: ${forecast.snapshot_used ? "stored daily snapshot" : "computed on request"}</span>
     </div>
   `;
+  if (elements.footerDataAsOf) {
+    elements.footerDataAsOf.textContent = `Data as of ${formatDate(forecast.data_as_of || forecast.latest_date)}`;
+  }
 }
 
 function renderTickerProfile(profile, forecast) {
@@ -439,27 +693,41 @@ function renderTickerProfile(profile, forecast) {
   }
   const fields = profile.fields || {};
   const rows = [
-    ["Bid", formatCurrencyOptional(fields.bid)],
-    ["Ask", formatCurrencyOptional(fields.ask)],
-    ["Last sale", formatCurrencyOptional(fields.last_sale)],
-    ["Open", formatCurrencyOptional(fields.open)],
-    ["High", formatCurrencyOptional(fields.high)],
-    ["Low", formatCurrencyOptional(fields.low)],
-    ["Exchange", fields.exchange || "Unavailable"],
-    ["Mkt cap", formatLargeNumber(fields.market_cap)],
-    ["P/E ratio", formatNumberOptional(fields.pe_ratio, 2)],
-    ["52W high", formatCurrencyOptional(fields.fifty_two_week_high)],
-    ["52W low", formatCurrencyOptional(fields.fifty_two_week_low)],
-    ["Volume", formatLargeNumber(fields.volume)],
-    ["Avg vol", formatLargeNumber(fields.average_volume)],
-    ["Margin req", formatPercentOptional(fields.margin_requirement)],
-    ["Dividend freq.", fields.dividend_frequency || "Unavailable"],
-    ["12-month yield", formatPercentOptional(fields.dividend_yield)],
-    ["Ex-dividend date", fields.ex_dividend_date || "Unavailable"],
-  ];
+    { label: "Bid", value: formatCurrencyOptional(fields.bid), raw: fields.bid, optional: true },
+    { label: "Ask", value: formatCurrencyOptional(fields.ask), raw: fields.ask, optional: true },
+    { label: "Last sale", value: formatCurrencyOptional(fields.last_sale), raw: fields.last_sale },
+    { label: "Exchange", value: fields.exchange || "Unavailable", raw: fields.exchange, optional: true },
+    { label: "Mkt cap", value: formatLargeNumber(fields.market_cap), raw: fields.market_cap, optional: true },
+    { label: "P/E ratio", value: formatNumberOptional(fields.pe_ratio, 2), raw: fields.pe_ratio, optional: true },
+    {
+      label: "52W high",
+      value: formatCurrencyOptional(fields.fifty_two_week_high),
+      raw: fields.fifty_two_week_high,
+      optional: true,
+    },
+    {
+      label: "52W low",
+      value: formatCurrencyOptional(fields.fifty_two_week_low),
+      raw: fields.fifty_two_week_low,
+      optional: true,
+    },
+    { label: "Volume", value: formatLargeNumber(fields.volume), raw: fields.volume, optional: true },
+    {
+      label: "Dividend freq.",
+      value: fields.dividend_frequency || "Unavailable",
+      raw: fields.dividend_frequency,
+      optional: true,
+    },
+    {
+      label: "12-month yield",
+      value: formatPercentOptional(fields.dividend_yield),
+      raw: fields.dividend_yield,
+      optional: true,
+    },
+  ].filter((row) => !row.optional || hasProfileValue(row.raw));
   elements.tickerProfile.innerHTML = rows
     .map(
-      ([label, value]) => `
+      ({ label, value }) => `
         <div class="profile-item">
           <span>${label}</span>
           <strong>${value}</strong>
@@ -480,6 +748,9 @@ function renderTickerProfile(profile, forecast) {
       `Profile data as of ${profile.as_of_date || "Unavailable"}; market data as of ${profile.data_as_of || "Unavailable"}.`,
     );
   }
+  if (profile.source === "local_artifacts") {
+    warnings.push("Market cap, P/E, bid/ask, and dividend fields require refreshed profile snapshots from Supabase/yfinance.");
+  }
   if (warnings.length > 0) {
     elements.tickerNarrative.insertAdjacentHTML(
       "beforeend",
@@ -489,65 +760,147 @@ function renderTickerProfile(profile, forecast) {
 }
 
 function renderMetricBlock(target, entries) {
-  target.innerHTML = entries.map(([label, value, tooltip]) => metricCard(label, value, tooltip)).join("");
+  target.innerHTML = entries
+    .map(([label, value, tooltip, subtitle]) => metricCard(label, value, tooltip, subtitle))
+    .join("");
 }
 
-function renderAllocationTable(target, allocations) {
-  target.innerHTML = "";
-  allocations.forEach((allocation) => {
-    const row = document.createElement("div");
-    row.className = "row allocation-row";
-    row.innerHTML = `
-      <strong>${allocation.ticker || allocation.asset_class}</strong>
-      <span>${allocation.asset_class || ""}</span>
-      <span>${formatPercent(allocation.weight)}</span>
-      <span>${formatCurrency(allocation.amount)}</span>
-    `;
-    target.appendChild(row);
-  });
+function renderAllocationTable(target, allocations, options = {}) {
+  const sourceRows = allocations || [];
+  const rows = sourceRows.slice(0, options.limit || sourceRows.length);
+  target.innerHTML = `
+    <div class="row table-head asset-row">
+      <span>${options.firstLabel || "Ticker"}</span>
+      <span>${options.secondLabel || "Class"}</span>
+      <span>Weight</span>
+      <span>Value</span>
+    </div>
+    ${rows
+      .map(
+        (allocation) => `
+          <div class="row asset-row">
+            <strong>${allocation.ticker || allocation.asset_class}</strong>
+            <span>${allocation.asset_class || ""}</span>
+            <span>${formatPercent(allocation.weight)}</span>
+            <span>${formatCurrency(allocation.amount || 0)}</span>
+          </div>
+        `,
+      )
+      .join("")}
+  `;
 }
 
 function renderTradePlan(target, trades) {
-  target.innerHTML = "";
-  trades.forEach((trade) => {
-    const row = document.createElement("div");
-    row.className = "row trade-row";
-    row.innerHTML = `
-      <strong>${trade.action} ${trade.ticker}</strong>
-      <span>${trade.asset_class}</span>
-      <span>${formatPercent(trade.weight)}</span>
-      <span>${formatCurrency(trade.amount)}</span>
-    `;
-    target.appendChild(row);
-  });
+  target.innerHTML = `
+    <div class="row table-head trade-row">
+      <span>Action</span>
+      <span>Ticker</span>
+      <span>Weight</span>
+      <span>Amount</span>
+    </div>
+    ${(trades || [])
+      .map((trade) => {
+        const isHold = String(trade.action).includes("hold");
+        const action = isHold ? "Hold" : "Buy";
+        return `
+          <div class="row trade-row">
+            <span class="action-pill ${isHold ? "hold" : ""}">${action}</span>
+            <strong>${trade.ticker}</strong>
+            <span>${formatPercent(trade.weight)}</span>
+            <span>${formatCurrency(trade.amount)}</span>
+          </div>
+        `;
+      })
+      .join("")}
+  `;
 }
 
-function renderWarnings(target, warnings) {
-  target.innerHTML = "";
-  (warnings || []).forEach((warning) => {
-    const row = document.createElement("article");
-    row.className = "warning-banner";
-    row.textContent = warning;
-    target.appendChild(row);
-  });
+function renderWarnings(target, warnings, tone = "warn") {
+  target.innerHTML = (warnings || []).map((warning) => insight(warning, tone)).join("");
 }
 
 function selectedSimulationTickers() {
   return Array.from(elements.simulationTickers.selectedOptions).map((option) => option.value);
 }
 
+function renderClassAllocation(allocations) {
+  const lookup = Object.fromEntries(
+    (allocations || []).map((allocation) => [allocation.asset_class, Number(allocation.weight || 0)]),
+  );
+  const stock = lookup.stock || 0;
+  const etf = stock + (lookup.etf || 0);
+  const crypto = etf + (lookup.crypto || 0);
+  const rows = [
+    ["Stocks", lookup.stock || 0, "stock"],
+    ["ETFs", lookup.etf || 0, "etf"],
+    ["Crypto", lookup.crypto || 0, "crypto"],
+    ["Cash", lookup.cash || 0, "cash"],
+  ].filter((row) => row[1] > 0.0001);
+  elements.simulationClasses.innerHTML = `
+    <div class="allocation-view">
+      <div class="allocation-donut" style="--stock: ${stock * 100}%; --etf: ${etf * 100}%; --crypto: ${crypto * 100}%;">
+        <div><span>Total</span><strong>100%</strong></div>
+      </div>
+      <div class="allocation-legend">
+        ${rows
+          .map(
+            ([label, weight, key]) => `
+              <div class="legend-row">
+                <span class="legend-dot ${key}"></span>
+                <span>${label}</span>
+                <strong>${formatPercent(weight)}</strong>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderSimulation(result) {
-  renderMetricBlock(elements.simulationSummary, [
-    ["Bear value", formatCurrency(result.summary.bear_value), literacy.bear],
-    ["Base value", formatCurrency(result.summary.base_value), literacy.base],
-    ["Bull value", formatCurrency(result.summary.bull_value), literacy.bull],
-    ["Base return", formatPercent(result.summary.base_return)],
-    ["Average confidence", formatPercent(result.summary.average_confidence), literacy.confidence],
-  ]);
-  renderWarnings(elements.simulationWarnings, result.warnings);
-  renderAllocationTable(elements.simulationClasses, result.class_allocations);
-  renderAllocationTable(elements.simulationAssets, result.asset_allocations);
+  state.simulation = result;
+  elements.simulationSummary.innerHTML = [
+    `<article class="scenario-tile bear">
+      <span>Bear scenario</span>
+      <strong>${formatCurrency(result.summary.bear_value)}</strong>
+      <small class="${toneForValue(result.summary.bear_return)}">${signedPercentLabel(result.summary.bear_return)}</small>
+    </article>`,
+    `<article class="scenario-tile base">
+      <span>Base scenario</span>
+      <strong>${formatCurrency(result.summary.base_value)}</strong>
+      <small class="${toneForValue(result.summary.base_return)}">${signedPercentLabel(result.summary.base_return)} · ${formatPercent(result.summary.average_confidence)} avg confidence</small>
+    </article>`,
+    `<article class="scenario-tile bull">
+      <span>Bull scenario</span>
+      <strong>${formatCurrency(result.summary.bull_value)}</strong>
+      <small class="${toneForValue(result.summary.bull_return)}">${signedPercentLabel(result.summary.bull_return)}</small>
+    </article>`,
+    `<article class="scenario-tile">
+      <span>Average confidence</span>
+      <strong>${formatPercent(result.summary.average_confidence)}</strong>
+    </article>`,
+  ].join("");
+  const volatilityProxy = Math.max(
+    Math.abs(Number(result.summary.bull_return || 0) - Number(result.summary.bear_return || 0)) / 2,
+    0,
+  );
+  elements.simulationWarnings.innerHTML = [
+    insight(
+      `Base scenario suggests ${formatPercent(result.summary.base_return)} over the next ${result.horizon_days} days with ${formatPercent(result.summary.average_confidence)} average confidence.`,
+      "good",
+    ),
+    insight(`Scenario dispersion is ${formatPercent(volatilityProxy)}, based on bear and bull portfolio outcomes.`, "warn"),
+    insight(`Diversified across ${result.asset_allocations.length} positions with risk-managed cash handling.`, "info"),
+    ...(result.warnings || []).map((warning) => insight(warning, "info")),
+  ].join("");
+  renderClassAllocation(result.class_allocations);
+  renderAllocationTable(elements.simulationAssets, result.asset_allocations, { limit: 10 });
   renderTradePlan(elements.simulationTrades, result.trade_plan);
+  if (elements.footerDataAsOf && state.universe?.latest_date) {
+    elements.footerDataAsOf.textContent = `Data as of ${formatDate(state.universe.latest_date)}`;
+  }
+  renderDataHealthCards();
 }
 
 function renderRlAllocation(result) {
@@ -559,7 +912,10 @@ function renderRlAllocation(result) {
     ["Model-estimated daily return", formatPercent(result.summary.expected_daily_return)],
     ["Annualized volatility", formatPercent(result.summary.annualized_volatility), literacy.volatility],
   ]);
-  renderAllocationTable(elements.rlClasses, result.class_allocations);
+  renderAllocationTable(elements.rlClasses, result.class_allocations, {
+    firstLabel: "Class",
+    secondLabel: "",
+  });
 }
 
 function renderBacktest(result) {
@@ -578,10 +934,57 @@ function renderBacktest(result) {
   );
 }
 
+function renderDataHealthCards() {
+  if (!elements.dataHealthCards) return;
+  const health = state.health || {};
+  const models = state.models || {};
+  const refresh = state.refreshStatus || {};
+  const latestRun = refresh.latest_run || {};
+  const latestMarketDate = refresh.latest_market_date || state.universe?.latest_date || latestRun.completed_at;
+  const assetCount = refresh.asset_count ?? state.universe?.tickers?.length;
+  const confidence = state.simulation?.summary?.average_confidence;
+  const backtestMetrics = state.backtest?.summary_metrics || {};
+  const sharpeRatio = backtestMetrics.sharpe_ratio;
+  const backtestSubtitle = isMissing(sharpeRatio)
+    ? "Sharpe ratio pending"
+    : `${formatNumber(sharpeRatio, 2)} Sharpe ratio`;
+  const latestSubtitle = latestRun.mode
+    ? `${latestRun.mode} refresh`
+    : refresh.market_index_refresh?.as_of_date
+      ? `Index refresh ${formatDate(refresh.market_index_refresh.as_of_date)}`
+      : "Latest available market date";
+
+  elements.dataHealthCards.innerHTML = [
+    `<article class="health-card">
+      <span>Model status</span>
+      <strong class="${health.ready === false ? "negative" : "positive"}">${health.ready === false ? "Degraded" : "Healthy"}</strong>
+      <small>${health.error || "All systems operational"}</small>
+    </article>`,
+    `<article class="health-card">
+      <span>Data freshness</span>
+      <strong>${latestRun.completed_at ? formatDateTime(latestRun.completed_at) : formatDate(latestMarketDate)}</strong>
+      <small>${latestSubtitle}</small>
+    </article>`,
+    `<article class="health-card">
+      <span>Universe coverage</span>
+      <strong>${formatInteger(assetCount)}</strong>
+      <small>${classCoverageLabel(state.universe)}</small>
+    </article>`,
+    `<article class="health-card">
+      <span>Backtest summary</span>
+      <strong>${isMissing(confidence) ? "Pending" : formatPercent(confidence)}</strong>
+      <small>${isMissing(confidence) ? models?.explainability?.method || "Scenario diagnostics pending" : `Avg confidence · ${backtestSubtitle}`}</small>
+    </article>`,
+  ].join("");
+}
+
 async function refreshDiagnostics() {
   setLoading(elements.healthBlock);
   setLoading(elements.modelsBlock);
   setLoading(elements.refreshStatusBlock);
+  if (elements.dataHealthCards) {
+    setLoading(elements.dataHealthCards);
+  }
   const [healthResult, modelsResult, refreshResult] = await Promise.allSettled([
     callSectionApi("health", "/api/health"),
     callSectionApi("models", "/api/models"),
@@ -599,17 +1002,27 @@ async function refreshDiagnostics() {
     refreshResult.status === "fulfilled"
       ? JSON.stringify(refreshResult.value, null, 2)
       : `Refresh status unavailable: ${refreshResult.reason.message}`;
+  if (elements.dataHealthCards) {
+    state.health = healthResult.status === "fulfilled" ? healthResult.value : null;
+    state.models = modelsResult.status === "fulfilled" ? modelsResult.value : null;
+    state.refreshStatus = refreshResult.status === "fulfilled" ? refreshResult.value : null;
+    renderDataHealthCards();
+  }
 }
 
 async function loadUniverse() {
   state.universe = await callSectionApi("universe", "/api/universe");
   renderUniverse(state.universe);
+  renderDataHealthCards();
 }
 
 async function runMarketForecast() {
   setLoading(elements.marketTable);
   setLoading(elements.marketHighlights);
   setLoading(elements.marketIndices);
+  setLoading(elements.marketInsightList);
+  setLoading(elements.topOpportunities);
+  setLoading(elements.sentimentReasons);
   try {
     const [indexResult, marketResult] = await Promise.allSettled([
       callSectionApi("marketIndices", "/api/market/indices"),
@@ -632,6 +1045,8 @@ async function runMarketForecast() {
     setError(elements.marketTable, `Market forecast unavailable: ${error.message}`);
     setError(elements.marketHighlights, "Market highlights unavailable.");
     setError(elements.marketIndices, "Market index data unavailable.");
+    setError(elements.marketInsightList, "Market insights unavailable.");
+    setError(elements.topOpportunities, "Top opportunities unavailable.");
     throw error;
   }
 }
@@ -639,6 +1054,8 @@ async function runMarketForecast() {
 async function runTickerForecast(ticker = elements.tickerSelect.value) {
   setLoading(elements.tickerMetrics);
   setLoading(elements.tickerProfile);
+  setLoading(elements.scenarioPathSummary);
+  setLoading(elements.tickerInsights);
   elements.tickerNarrative.innerHTML = "";
   try {
     const [result, profile] = await Promise.all([
@@ -659,12 +1076,18 @@ async function runTickerForecast(ticker = elements.tickerSelect.value) {
     if (isAbort(error)) return;
     setError(elements.tickerMetrics, `Ticker forecast unavailable: ${error.message}`);
     setError(elements.tickerProfile, "Company data unavailable.");
+    setError(elements.scenarioPathSummary, "Scenario summary unavailable.");
+    setError(elements.tickerInsights, "Ticker insights unavailable.");
     throw error;
   }
 }
 
 async function runSimulation() {
   setLoading(elements.simulationSummary);
+  setLoading(elements.simulationClasses);
+  setLoading(elements.simulationAssets);
+  setLoading(elements.simulationTrades);
+  setLoading(elements.simulationWarnings);
   const selected = selectedSimulationTickers();
   try {
     const result = await callSectionApi("simulation", "/api/portfolio/simulations", {
@@ -680,6 +1103,7 @@ async function runSimulation() {
   } catch (error) {
     if (isAbort(error)) return;
     setError(elements.simulationSummary, `Simulation unavailable: ${error.message}`);
+    setError(elements.simulationWarnings, "Simulation insights unavailable.");
     throw error;
   }
 }
@@ -712,9 +1136,13 @@ async function runBacktest() {
         strict_validation: true,
       }),
     });
+    state.backtest = result;
     renderBacktest(result);
+    renderDataHealthCards();
   } catch (error) {
     if (isAbort(error)) return;
+    state.backtest = null;
+    renderDataHealthCards();
     setError(elements.backtestSummary, `Backtest unavailable: ${error.message}`);
     throw error;
   }
@@ -723,16 +1151,17 @@ async function runBacktest() {
 async function refreshDashboard() {
   elements.apiStatus.textContent = "Connecting to backend...";
   elements.apiStatus.className = "muted";
-  await refreshDiagnostics();
   if (!state.universe) {
     await loadUniverse();
   }
+  await refreshDiagnostics();
   const results = await Promise.allSettled([
     runMarketForecast(),
     runTickerForecast(),
     runSimulation(),
+    runBacktest(),
   ]);
-  const failed = results.filter((result) => result.status === "rejected");
+  const failed = results.slice(0, 3).filter((result) => result.status === "rejected");
   if (failed.length > 0) {
     throw failed[0].reason;
   }
@@ -766,6 +1195,20 @@ document.querySelectorAll(".tab").forEach((tab) => {
     document.querySelectorAll(".view").forEach((node) => node.classList.remove("is-active"));
     tab.classList.add("is-active");
     document.querySelector(`#${tab.dataset.tab}`).classList.add("is-active");
+    if (tab.dataset.tab === "forecast" && state.chart) {
+      requestAnimationFrame(() => state.chart.resize());
+    }
+  });
+});
+
+document.querySelectorAll(".range-button").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".range-button").forEach((node) => node.classList.remove("is-active"));
+    button.classList.add("is-active");
+    state.chartRange = button.dataset.range;
+    if (state.currentForecast) {
+      renderForecastChart(state.currentForecast);
+    }
   });
 });
 

@@ -186,3 +186,7 @@ class RefreshStatusResponse(BaseModel):
     stale_tickers: list[str]
     latest_market_date: str | None = None
     message: str | None = None
+    asset_count: int | None = None
+    market_index_refresh: dict[str, Any] | None = None
+    checked_at: str | None = None
+    today: str | None = None

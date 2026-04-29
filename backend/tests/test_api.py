@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+import backend.app.main as app_main
 from backend.app.core.config import reset_settings
 from backend.app.main import create_app
 from backend.app.ml.pipeline import reset_engine
@@ -37,6 +38,17 @@ def test_universe_endpoint_returns_current_artifact_tickers(client):
     assert all(entry["latest_price"] > 0 for entry in payload["tickers"])
 
 
+def test_refresh_status_reports_local_artifact_freshness(client):
+    response = client.get("/api/data/refresh/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["configured"] is False
+    assert payload["source"] == "local_artifacts"
+    assert payload["asset_count"] == 6
+    assert payload["latest_market_date"]
+    assert "local artifact" in payload["message"]
+
+
 def test_ticker_forecast_endpoint_returns_ordered_scenarios(client):
     response = client.post(
         "/api/forecasts/ticker",
@@ -54,6 +66,17 @@ def test_ticker_forecast_endpoint_returns_ordered_scenarios(client):
     assert len({round(point["price"], 4) for point in payload["forecast_paths"]["base"]}) > 10
     assert payload["return_estimator"]["method"] == "multi_window_shrunk"
     assert 0 <= payload["confidence"] <= 1
+
+
+def test_local_profile_uses_artifact_and_config_fallbacks(client):
+    response = client.get("/api/tickers/AAPL/profile")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "local_artifacts"
+    assert payload["display_name"] == "Apple"
+    assert payload["fields"]["exchange"] == "NASDAQ"
+    assert payload["fields"]["fifty_two_week_high"] >= payload["fields"]["last_sale"]
+    assert payload["fields"]["fifty_two_week_low"] <= payload["fields"]["last_sale"]
 
 
 def test_ticker_forecast_invalid_ticker_returns_clear_error(client):
@@ -179,6 +202,55 @@ def test_backtest_trade_log_matches_reported_turnover(client):
     assert logged_turnover == pytest.approx(reported_turnover, rel=0.15, abs=1e-3)
 
 
+def test_backend_startup_refreshes_market_indices_without_supabase(tmp_path, monkeypatch):
+    artifact_root = build_fixture_artifact_tree(tmp_path)
+    dataset_root = tmp_path / "datasets"
+    dataset_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("STOCKIFY_MARKET_INDEX_AUTO_REFRESH", "true")
+
+    def fake_refresh(settings, *, repository=None):
+        return {
+            "enabled": True,
+            "provider": "fake",
+            "as_of_date": "2026-04-28",
+            "rows_written": 0,
+            "rows": [
+                {
+                    "symbol": "SP500",
+                    "as_of_date": "2026-04-28",
+                    "label": "S&P 500",
+                    "display_name": "S&P 500 Index",
+                    "provider_symbol": "^GSPC",
+                    "value": 5100.0,
+                    "previous_close": 5000.0,
+                    "change": 100.0,
+                    "change_percent": 0.02,
+                    "currency": "USD",
+                    "provider": "fake",
+                    "display_order": 1,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(app_main, "refresh_market_index_snapshots", fake_refresh)
+    reset_settings()
+    reset_engine()
+
+    with TestClient(app_main.create_app()) as test_client:
+        response = test_client.get("/api/market/indices")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source"] == "fake"
+        assert payload["as_of_date"] == "2026-04-28"
+        assert payload["indices"][0]["symbol"] == "SP500"
+
+    reset_settings()
+    reset_engine()
+
+
 def test_corrupted_artifacts_return_degraded_health_and_503(tmp_path, monkeypatch):
     artifact_root = build_fixture_artifact_tree(tmp_path)
     (artifact_root / "stock" / "prices.npy").unlink()
@@ -187,6 +259,7 @@ def test_corrupted_artifacts_return_degraded_health_and_503(tmp_path, monkeypatc
 
     monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
     monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("STOCKIFY_MARKET_INDEX_AUTO_REFRESH", "false")
     reset_settings()
     reset_engine()
 

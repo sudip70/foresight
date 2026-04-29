@@ -123,6 +123,10 @@ The job is idempotent: it upserts `asset_universe`, `market_ohlcv_daily`, `asset
 
 The FastAPI app prefers Supabase-backed market data when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present. If they are absent, it falls back to the current artifact-backed dashboard.
 
+The local artifact rebuild path also reads `config/asset_universe.v1.json`, so rebuilt stock and ETF bundles use the same expanded universe as Supabase. If the rebuilt ticker count no longer matches an older PPO action space, the bundle temporarily switches to the deterministic signal policy until PPO is retrained.
+
+Market index cards are refreshed from the configured market data provider when the backend starts. By default this uses `config/market_indices.v1.json`, `STOCKIFY_MARKET_DATA_PROVIDER=yfinance`, and a 10-day lookback. Set `STOCKIFY_MARKET_INDEX_AUTO_REFRESH=false` to disable startup index refresh.
+
 ## PPO Retraining
 
 Once the OHLCV bundles are refreshed, retrain the stock, crypto, and ETF PPO agents with:

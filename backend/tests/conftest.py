@@ -21,6 +21,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("STOCKIFY_SURROGATE_FIDELITY_THRESHOLD", "0.1")
     monkeypatch.setenv("STOCKIFY_TOP_ASSET_TARGET_COUNT", "2")
     monkeypatch.setenv("STOCKIFY_DEFAULT_BACKTEST_STEPS", "12")
+    monkeypatch.setenv("STOCKIFY_MARKET_INDEX_AUTO_REFRESH", "false")
 
     reset_settings()
     reset_engine()
