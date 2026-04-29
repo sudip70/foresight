@@ -27,6 +27,9 @@ class Settings:
     meta_cash_enabled: bool
     meta_cash_annual_return: float
     market_data_provider: str
+    market_index_auto_refresh: bool
+    market_index_config_path: Path
+    market_index_refresh_lookback_days: int
     supabase_url: str
     supabase_service_role_key: str
 
@@ -66,6 +69,19 @@ def get_settings() -> Settings:
         in {"1", "true", "yes", "on"},
         meta_cash_annual_return=float(os.getenv("STOCKIFY_META_CASH_ANNUAL_RETURN", "0.04")),
         market_data_provider=os.getenv("STOCKIFY_MARKET_DATA_PROVIDER", "yfinance"),
+        market_index_auto_refresh=os.getenv(
+            "STOCKIFY_MARKET_INDEX_AUTO_REFRESH", "true"
+        ).lower()
+        in {"1", "true", "yes", "on"},
+        market_index_config_path=Path(
+            os.getenv(
+                "STOCKIFY_MARKET_INDEX_CONFIG_PATH",
+                REPO_ROOT / "config" / "market_indices.v1.json",
+            )
+        ),
+        market_index_refresh_lookback_days=int(
+            os.getenv("STOCKIFY_MARKET_INDEX_REFRESH_LOOKBACK_DAYS", "10")
+        ),
         supabase_url=os.getenv("SUPABASE_URL", ""),
         supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
     )

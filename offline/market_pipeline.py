@@ -20,6 +20,13 @@ import ta.volume
 
 
 OHLCV_FIELDS = ("Open", "High", "Low", "Close", "Volume")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_UNIVERSE_CONFIG_PATH = REPO_ROOT / "config" / "asset_universe.v1.json"
+DEFAULT_CLASS_BENCHMARKS = {
+    "stock": "SPY",
+    "crypto": "BTC-USD",
+    "etf": "SPY",
+}
 MACRO_FEATURE_COLUMNS = (
     "VIX Market Volatility",
     "Federal Funds Rate",
@@ -40,45 +47,36 @@ MICRO_FEATURES = (
     "williams_r",
     "atr",
 )
-ASSET_UNIVERSES = {
-    "stock": {
-        "tickers": [
-            "AAPL",
-            "MSFT",
-            "GOOGL",
-            "AMZN",
-            "META",
-            "TSLA",
-            "NVDA",
-            "JPM",
-            "V",
-            "UNH",
-        ],
-        "benchmark": "SPY",
-        "start_date": "2015-01-01",
-    },
-    "crypto": {
-        "tickers": [
-            "BTC-USD",
-            "ETH-USD",
-            "BNB-USD",
-            "SOL-USD",
-            "ADA-USD",
-            "XRP-USD",
-            "DOGE-USD",
-            "LTC-USD",
-            "DOT-USD",
-            "AVAX-USD",
-        ],
-        "benchmark": "BTC-USD",
-        "start_date": "2018-01-01",
-    },
-    "etf": {
-        "tickers": ["SPY", "QQQ", "VTI", "DIA", "IWM", "EFA", "EEM", "VNQ", "LQD", "BND"],
-        "benchmark": "SPY",
-        "start_date": "2018-01-01",
-    },
-}
+
+def load_asset_universes(path: Path = DEFAULT_UNIVERSE_CONFIG_PATH) -> dict[str, dict[str, object]]:
+    payload = json.loads(path.read_text())
+    assets = payload.get("assets", [])
+    if not isinstance(assets, list) or not assets:
+        raise ValueError(f"No assets found in universe config: {path}")
+
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for row in assets:
+        if not row.get("active", True):
+            continue
+        asset_class = str(row["asset_class"])
+        grouped.setdefault(asset_class, []).append(row)
+
+    universes: dict[str, dict[str, object]] = {}
+    for asset_class, rows in sorted(grouped.items()):
+        tickers = [str(row.get("provider_symbol") or row["ticker"]).strip().upper() for row in rows]
+        start_dates = [
+            str(row.get("start_date") or payload.get("default_start_date") or "2018-01-01")
+            for row in rows
+        ]
+        universes[asset_class] = {
+            "tickers": tickers,
+            "benchmark": DEFAULT_CLASS_BENCHMARKS.get(asset_class, tickers[0]),
+            "start_date": min(start_dates),
+        }
+    return universes
+
+
+ASSET_UNIVERSES = load_asset_universes()
 
 
 @dataclass(frozen=True)
@@ -411,15 +409,31 @@ def build_asset_dataset(
     if metadata_path.exists():
         metadata = json.loads(metadata_path.read_text())
 
+    existing_action_dim = int(metadata.get("action_dim", len(tickers)))
+    existing_backend = str(metadata.get("policy_backend", "sb3")).lower()
+    model_matches_universe = existing_action_dim in {len(tickers), len(tickers) + 1}
+    use_signal_policy = bool(metadata) and existing_backend == "sb3" and not model_matches_universe
+
     metadata.update(
         {
             "asset_class": asset_class,
             "tickers": tickers,
+            "ticker_count": len(tickers),
             "benchmark_ticker": benchmark,
             "feature_version": "ohlcv-v2",
             "uses_ohlcv_features": True,
             "micro_feature_count": int(micro_frame.shape[1]),
             "macro_feature_count": int(macro_frame.shape[1]),
+            "feature_selection": {
+                "micro_source": "micro_indicators_raw.npy",
+                "micro_original_count": int(micro_frame.shape[1]),
+                "micro_selected_count": int(micro_scaled.shape[1]),
+                "micro_dropped_indices": [],
+                "macro_source": "macro_indicators_raw.npy",
+                "macro_original_count": int(macro_frame.shape[1]),
+                "macro_selected_count": int(macro_scaled.shape[1]),
+                "macro_dropped_indices": [],
+            },
             "ohlcv_shape": list(ohlcv.shape),
             "aligned_rows": int(len(shared_dates)),
             "date_start": str(shared_dates[0].date()),
@@ -431,6 +445,22 @@ def build_asset_dataset(
             "micro_features": [feature for ticker in tickers for feature in MICRO_FEATURES],
         }
     )
+    if use_signal_policy:
+        metadata.update(
+            {
+                "algorithm": "signal",
+                "policy_backend": "single_agent_signal",
+                "model_file": "signal_policy.json",
+                "action_dim": len(tickers) + 1,
+                "cash_enabled": True,
+                "policy_replaced_reason": (
+                    "Existing PPO action dimension did not match the rebuilt ticker universe. "
+                    "Retrain PPO to replace this deterministic signal policy."
+                ),
+                "previous_policy_backend": existing_backend,
+                "previous_action_dim": existing_action_dim,
+            }
+        )
     metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
     _commit_staged_artifact_dir(staging_asset_dir, asset_dir)
 

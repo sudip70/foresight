@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from functools import lru_cache
+import json
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,8 +27,9 @@ from backend.app.api.schemas import (
     TickerForecastResponse,
     UniverseResponse,
 )
-from backend.app.core.config import get_settings
+from backend.app.core.config import REPO_ROOT, get_settings
 from backend.app.market.forecasting import SupabaseForecastEngine
+from backend.app.market.index_refresh import refresh_market_index_snapshots
 from backend.app.market.repository import (
     MarketDataUnavailable,
     build_market_repository,
@@ -88,6 +91,68 @@ def _market_forecast_engine(app: FastAPI):
     return getattr(app.state, "forecast_engine", None)
 
 
+def _market_index_cache_payload(app: FastAPI) -> dict:
+    rows = getattr(app.state, "market_index_rows", []) or []
+    refresh_result = getattr(app.state, "market_index_refresh_result", None) or {}
+    error = getattr(app.state, "market_index_refresh_error", None)
+    as_of_dates = [str(row["as_of_date"]) for row in rows if row.get("as_of_date")]
+    disclaimer = "Index levels are refreshed from the configured market data provider at backend startup."
+    if error is not None:
+        disclaimer = f"{disclaimer} Latest startup refresh failed: {error}"
+    return {
+        "source": refresh_result.get("provider") or "startup_refresh",
+        "as_of_date": refresh_result.get("as_of_date") or (max(as_of_dates) if as_of_dates else None),
+        "indices": sorted(rows, key=lambda row: int(row.get("display_order") or 0)),
+        "disclaimer": disclaimer,
+    }
+
+
+def _local_refresh_status_payload(app: FastAPI) -> dict:
+    payload = empty_refresh_status()
+    payload["message"] = "Using local artifact market data; Supabase refresh logs are not configured."
+
+    engine = getattr(app.state, "engine", None)
+    if engine is not None:
+        try:
+            universe = engine.universe_payload()
+            tickers = universe.get("tickers") or []
+            payload["latest_market_date"] = universe.get("latest_date") or None
+            payload["asset_count"] = len(tickers)
+        except Exception as exc:  # pragma: no cover - defensive diagnostics path
+            payload["message"] = f"{payload['message']} Local artifact freshness is unavailable: {exc}"
+
+    refresh_result = getattr(app.state, "market_index_refresh_result", None)
+    refresh_error = getattr(app.state, "market_index_refresh_error", None)
+    if refresh_result:
+        payload["market_index_refresh"] = {
+            "status": "ok",
+            "provider": refresh_result.get("provider"),
+            "as_of_date": refresh_result.get("as_of_date"),
+            "rows": len(refresh_result.get("rows", []) or []),
+            "rows_written": refresh_result.get("rows_written"),
+        }
+    elif refresh_error is not None:
+        payload["market_index_refresh"] = {
+            "status": "failed",
+            "message": str(refresh_error),
+        }
+
+    return payload
+
+
+@lru_cache(maxsize=1)
+def _asset_universe_metadata() -> dict[str, dict]:
+    path = REPO_ROOT / "config" / "asset_universe.v1.json"
+    try:
+        payload = json.loads(path.read_text())
+    except FileNotFoundError:
+        return {}
+    assets = payload.get("assets", [])
+    if not isinstance(assets, list):
+        return {}
+    return {str(row.get("ticker", "")).upper(): row for row in assets if row.get("ticker")}
+
+
 def _artifact_profile_payload(engine, ticker: str) -> dict:
     asset_class, index, canonical = engine._resolve_ticker(ticker)
     context = engine._combined_context["assets"][asset_class]
@@ -95,10 +160,13 @@ def _artifact_profile_payload(engine, ticker: str) -> dict:
     latest_date = str(engine._combined_context["dates"][latest_index])
     price = float(context["risky_prices"][latest_index, index])
     ohlcv = context["ohlcv"][latest_index, index]
+    lookback_start = max(0, latest_index - 251)
+    ohlcv_window = context["ohlcv"][lookback_start : latest_index + 1, index]
+    metadata = _asset_universe_metadata().get(canonical.upper(), {})
     return {
         "ticker": canonical,
         "asset_class": asset_class,
-        "display_name": canonical,
+        "display_name": metadata.get("display_name") or canonical,
         "as_of_date": None,
         "data_as_of": latest_date,
         "source": "local_artifacts",
@@ -109,11 +177,11 @@ def _artifact_profile_payload(engine, ticker: str) -> dict:
             "open": float(ohlcv[0]),
             "high": float(ohlcv[1]),
             "low": float(ohlcv[2]),
-            "exchange": None,
+            "exchange": metadata.get("exchange"),
             "market_cap": None,
             "pe_ratio": None,
-            "fifty_two_week_high": None,
-            "fifty_two_week_low": None,
+            "fifty_two_week_high": float(ohlcv_window[:, 1].max()),
+            "fifty_two_week_low": float(ohlcv_window[:, 2].min()),
             "volume": float(ohlcv[4]),
             "average_volume": None,
             "margin_requirement": None,
@@ -134,6 +202,9 @@ def create_app() -> FastAPI:
         app.state.market_repository = None
         app.state.market_repository_error = None
         app.state.forecast_engine = None
+        app.state.market_index_rows = []
+        app.state.market_index_refresh_result = None
+        app.state.market_index_refresh_error = None
         try:
             app.state.market_repository = _load_market_repository()
             if app.state.market_repository is not None:
@@ -143,6 +214,20 @@ def create_app() -> FastAPI:
                 )
         except Exception as exc:  # pragma: no cover - defensive startup path
             app.state.market_repository_error = exc
+        should_refresh_indices = settings.market_index_auto_refresh and (
+            app.state.market_repository is None
+            or bool(settings.supabase_url and settings.supabase_service_role_key)
+        )
+        if should_refresh_indices:
+            try:
+                refresh_result = refresh_market_index_snapshots(
+                    settings,
+                    repository=app.state.market_repository,
+                )
+                app.state.market_index_refresh_result = refresh_result
+                app.state.market_index_rows = refresh_result.get("rows", [])
+            except Exception as exc:  # pragma: no cover - provider/network defensive path
+                app.state.market_index_refresh_error = exc
         try:
             app.state.engine = _load_engine()
         except Exception as exc:  # pragma: no cover - defensive startup path
@@ -277,15 +362,16 @@ def create_app() -> FastAPI:
     def market_indices():
         forecast_engine = _market_forecast_engine(app)
         if forecast_engine is None:
-            return {
-                "source": "local_artifacts",
-                "as_of_date": None,
-                "indices": [],
-                "disclaimer": "Market index data is available when Supabase market data is configured.",
-            }
+            return _market_index_cache_payload(app)
         try:
-            return forecast_engine.market_indices_payload()
+            payload = forecast_engine.market_indices_payload()
+            if payload.get("indices"):
+                return payload
+            return _market_index_cache_payload(app)
         except MarketDataUnavailable as exc:
+            cache_payload = _market_index_cache_payload(app)
+            if cache_payload["indices"]:
+                return cache_payload
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Exception as exc:  # pragma: no cover - defensive
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -327,7 +413,7 @@ def create_app() -> FastAPI:
     def refresh_status():
         repository = getattr(app.state, "market_repository", None)
         if repository is None:
-            return empty_refresh_status()
+            return _local_refresh_status_payload(app)
         try:
             return repository.get_latest_refresh_status()
         except MarketDataUnavailable as exc:

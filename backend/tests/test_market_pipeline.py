@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,13 @@ from offline.market_pipeline import (
     compute_micro_indicator_frame,
     extract_asset_frames,
 )
+
+
+def test_asset_universes_use_expanded_config() -> None:
+    assert len(ASSET_UNIVERSES["stock"]["tickers"]) == 25
+    assert len(ASSET_UNIVERSES["etf"]["tickers"]) == 20
+    assert "AMD" in ASSET_UNIVERSES["stock"]["tickers"]
+    assert "XLK" in ASSET_UNIVERSES["etf"]["tickers"]
 
 
 def _market_frame_for(tickers: list[str], periods: int = 140) -> pd.DataFrame:
@@ -124,3 +132,30 @@ def test_build_asset_dataset_writes_ohlcv_and_feature_artifacts(tmp_path: Path) 
     assert (asset_dir / "dates.npy").exists()
     assert (asset_dir / "feature_names.json").exists()
     assert (tmp_path / "raw" / "etf_ohlcv.csv").exists()
+
+
+def test_build_asset_dataset_replaces_stale_policy_metadata(tmp_path: Path) -> None:
+    tickers = list(ASSET_UNIVERSES["stock"]["tickers"])
+    benchmark = str(ASSET_UNIVERSES["stock"]["benchmark"])
+    frame_tickers = tickers if benchmark in tickers else [*tickers, benchmark]
+    market_frame = _market_frame_for(frame_tickers)
+    macro_path = _macro_csv(tmp_path / "macro.csv", market_frame.index)
+    asset_dir = tmp_path / "artifacts" / "stock"
+    asset_dir.mkdir(parents=True)
+    (asset_dir / "metadata.json").write_text(
+        json.dumps({"policy_backend": "sb3", "model_file": "model.zip", "action_dim": 11})
+    )
+
+    build_asset_dataset(
+        asset_class="stock",
+        market_frame=market_frame,
+        macro_path=macro_path,
+        artifact_root=tmp_path / "artifacts",
+        reuse_existing_scalers=False,
+        persist_scalers=True,
+    )
+
+    metadata = json.loads((asset_dir / "metadata.json").read_text())
+    assert metadata["policy_backend"] == "single_agent_signal"
+    assert metadata["action_dim"] == len(tickers) + 1
+    assert metadata["previous_action_dim"] == 11
