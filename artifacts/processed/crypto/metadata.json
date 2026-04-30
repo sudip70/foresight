@@ -1,10 +1,10 @@
 {
   "action_dim": 11,
   "algorithm": "ppo",
-  "aligned_rows": 2072,
+  "aligned_rows": 2079,
   "asset_class": "crypto",
   "benchmark_ticker": "BTC-USD",
-  "date_end": "2026-04-22",
+  "date_end": "2026-04-29",
   "date_start": "2020-08-20",
   "eval_mean_benchmark_alpha": -0.0001361150529432695,
   "eval_mean_final_value": 0.9383383284788266,
@@ -13,10 +13,8 @@
   "eval_mean_sharpe": 0.34838334955080874,
   "eval_rows": 475,
   "feature_selection": {
-    "macro_dropped_indices": [
-      5
-    ],
-    "macro_original_count": 6,
+    "macro_dropped_indices": [],
+    "macro_original_count": 5,
     "macro_selected_count": 5,
     "macro_source": "macro_indicators_raw.npy",
     "micro_dropped_indices": [],
@@ -24,7 +22,7 @@
     "micro_selected_count": 100,
     "micro_source": "micro_indicators_raw.npy"
   },
-  "feature_version": "ohlcv-stationary-v4-cash-sleeve",
+  "feature_version": "ohlcv-v2",
   "macro_feature_count": 5,
   "macro_feature_names": [
     "VIX Market Volatility",
@@ -33,10 +31,10 @@
     "Unemployment Rate",
     "CPI All Items"
   ],
-  "macro_last_available_date": "2026-04-22",
+  "macro_last_available_date": "2026-04-29",
   "macro_source_path": "/Users/sudipshrestha/Projects-website/stockify/Stockify_Backup/datasets/raw/macroeconomic_data_2010_2024.csv",
   "market_data_source": "yfinance",
-  "market_data_updated_at": "2026-04-22T23:42:48.179641+00:00",
+  "market_data_updated_at": "2026-04-29T18:11:07.494341+00:00",
   "micro_feature_count": 100,
   "micro_features": [
     "rsi",
@@ -142,7 +140,7 @@
   ],
   "model_file": "model.zip",
   "ohlcv_shape": [
-    2072,
+    2079,
     10,
     5
   ],

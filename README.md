@@ -125,7 +125,7 @@ The FastAPI app prefers Supabase-backed market data when `SUPABASE_URL` and `SUP
 
 The local artifact rebuild path also reads `config/asset_universe.v1.json`, so rebuilt stock and ETF bundles use the same expanded universe as Supabase. If the rebuilt ticker count no longer matches an older PPO action space, the bundle temporarily switches to the deterministic signal policy until PPO is retrained.
 
-Market index cards are refreshed from the configured market data provider when the backend starts. By default this uses `config/market_indices.v1.json`, `STOCKIFY_MARKET_DATA_PROVIDER=yfinance`, and a 10-day lookback. Set `STOCKIFY_MARKET_INDEX_AUTO_REFRESH=false` to disable startup index refresh.
+Market index cards can be refreshed from the configured market data provider when the backend starts. Startup index refresh is disabled by default to keep local reloads fast. Set `STOCKIFY_MARKET_INDEX_AUTO_REFRESH=true` to enable it with `config/market_indices.v1.json`, `STOCKIFY_MARKET_DATA_PROVIDER=yfinance`, and a 10-day lookback.
 
 ## PPO Retraining
 

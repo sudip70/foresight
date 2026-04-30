@@ -70,7 +70,7 @@ def get_settings() -> Settings:
         meta_cash_annual_return=float(os.getenv("STOCKIFY_META_CASH_ANNUAL_RETURN", "0.04")),
         market_data_provider=os.getenv("STOCKIFY_MARKET_DATA_PROVIDER", "yfinance"),
         market_index_auto_refresh=os.getenv(
-            "STOCKIFY_MARKET_INDEX_AUTO_REFRESH", "true"
+            "STOCKIFY_MARKET_INDEX_AUTO_REFRESH", "false"
         ).lower()
         in {"1", "true", "yes", "on"},
         market_index_config_path=Path(

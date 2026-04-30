@@ -366,6 +366,19 @@ def build_asset_dataset(
 
     asset_dir = artifact_root / asset_class
     staging_asset_dir = _stage_artifact_dir(asset_dir)
+    metadata_path = staging_asset_dir / "metadata.json"
+    metadata = {}
+    if metadata_path.exists():
+        metadata = json.loads(metadata_path.read_text())
+
+    existing_backend = str(metadata.get("policy_backend", "sb3")).lower()
+    existing_macro_names = metadata.get("macro_feature_names")
+    if existing_backend == "sb3" and isinstance(existing_macro_names, list):
+        compatible_macro_names = [
+            str(name) for name in existing_macro_names if str(name) in macro_frame.columns
+        ]
+        if compatible_macro_names:
+            macro_frame = macro_frame.loc[:, compatible_macro_names]
 
     micro_scaled, _ = _scale_frame(
         micro_frame,
@@ -404,13 +417,7 @@ def build_asset_dataset(
     if raw_output_path is not None:
         save_raw_market_csv(normalized_frame.loc[shared_dates], raw_output_path)
 
-    metadata_path = staging_asset_dir / "metadata.json"
-    metadata = {}
-    if metadata_path.exists():
-        metadata = json.loads(metadata_path.read_text())
-
     existing_action_dim = int(metadata.get("action_dim", len(tickers)))
-    existing_backend = str(metadata.get("policy_backend", "sb3")).lower()
     model_matches_universe = existing_action_dim in {len(tickers), len(tickers) + 1}
     use_signal_policy = bool(metadata) and existing_backend == "sb3" and not model_matches_universe
 

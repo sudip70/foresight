@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from functools import lru_cache
 from types import MappingProxyType
 import importlib.util
@@ -236,6 +237,7 @@ class StockifyEngine:
             class_ranges=self._class_ranges(),
             cash_enabled=self.settings.meta_cash_enabled,
         )
+        self._all_ticker_forecast_cache: dict[tuple[int, int, str], list[dict]] = {}
 
     def _build_combined_context(self, assets: dict[str, AssetArtifacts]) -> dict:
         date_arrays = [np.asarray(bundle.dates) for bundle in assets.values()]
@@ -580,11 +582,13 @@ class StockifyEngine:
         daily_volatility: float,
         horizon_days: int,
         latest_date: np.datetime64,
+        forecast_start_date: str,
         z_score: float,
         price_series: np.ndarray,
     ) -> list[dict]:
         horizon = max(int(horizon_days), 1)
         days = list(range(0, horizon + 1))
+        forecast_start = np.datetime64(forecast_start_date, "D")
         historical = np.asarray(price_series, dtype=float).reshape(-1)
         recent_window = min(max(horizon, 30), 90, max(historical.shape[0] - 1, 1))
         recent_prices = historical[-(recent_window + 1) :]
@@ -622,7 +626,7 @@ class StockifyEngine:
             path.append(
                 {
                     "day": int(day),
-                    "date": str(latest_date + np.timedelta64(int(day), "D")),
+                    "date": str(forecast_start + np.timedelta64(int(day), "D")),
                     "price": float(projected),
                 }
             )
@@ -655,6 +659,7 @@ class StockifyEngine:
         ticker: str,
         horizon_days: int,
         window_size: int,
+        forecast_start_date: str | None = None,
     ) -> dict:
         asset_class, index, canonical = self._resolve_ticker(ticker)
         asset_context = self._combined_context["assets"][asset_class]
@@ -679,6 +684,7 @@ class StockifyEngine:
         daily_volatility = float(math.sqrt(max(float(projection_cov[index, index]), 0.0)))
         latest_price = float(price_series[-1])
         latest_date = dates[-1]
+        forecast_start_date = forecast_start_date or date.today().isoformat()
         scenario_z = 0.84
         bear_path = self._scenario_path(
             latest_price=latest_price,
@@ -686,6 +692,7 @@ class StockifyEngine:
             daily_volatility=daily_volatility,
             horizon_days=horizon,
             latest_date=latest_date,
+            forecast_start_date=forecast_start_date,
             z_score=-scenario_z,
             price_series=price_series,
         )
@@ -695,6 +702,7 @@ class StockifyEngine:
             daily_volatility=daily_volatility,
             horizon_days=horizon,
             latest_date=latest_date,
+            forecast_start_date=forecast_start_date,
             z_score=0.0,
             price_series=price_series,
         )
@@ -704,6 +712,7 @@ class StockifyEngine:
             daily_volatility=daily_volatility,
             horizon_days=horizon,
             latest_date=latest_date,
+            forecast_start_date=forecast_start_date,
             z_score=scenario_z,
             price_series=price_series,
         )
@@ -771,6 +780,7 @@ class StockifyEngine:
             "ticker": canonical,
             "asset_class": asset_class,
             "latest_date": str(latest_date),
+            "forecast_start_date": forecast_start_date,
             "latest_price": latest_price,
             "horizon_days": horizon,
             "historical_prices": historical_prices,
@@ -801,6 +811,7 @@ class StockifyEngine:
                 risk=0.5,
             ),
             "return_estimator": {**estimator, **public_estimator},
+            "data_as_of": str(latest_date),
             "literacy": {
                 "bear_base_bull": (
                     "Bear, base, and bull are scenario ranges, not guaranteed prices."
@@ -855,10 +866,12 @@ class StockifyEngine:
         horizon_days: int,
         window_size: int = 60,
     ) -> dict:
+        forecast_start_date = date.today().isoformat()
         return self._ticker_forecast_payload(
             ticker=ticker,
             horizon_days=horizon_days,
             window_size=window_size,
+            forecast_start_date=forecast_start_date,
         )
 
     def _all_ticker_forecasts(
@@ -867,6 +880,10 @@ class StockifyEngine:
         horizon_days: int,
         window_size: int,
     ) -> list[dict]:
+        forecast_start_date = date.today().isoformat()
+        cache_key = (max(int(horizon_days), 1), max(int(window_size), 2), forecast_start_date)
+        if cache_key in self._all_ticker_forecast_cache:
+            return [forecast.copy() for forecast in self._all_ticker_forecast_cache[cache_key]]
         forecasts = []
         for bundle in self.runtime.assets.values():
             for ticker in bundle.tickers:
@@ -875,8 +892,10 @@ class StockifyEngine:
                         ticker=ticker,
                         horizon_days=horizon_days,
                         window_size=window_size,
+                        forecast_start_date=forecast_start_date,
                     )
                 )
+        self._all_ticker_forecast_cache[cache_key] = [forecast.copy() for forecast in forecasts]
         return forecasts
 
     def _macro_payload(self) -> dict:
@@ -956,11 +975,13 @@ class StockifyEngine:
     ) -> dict:
         risk_value = float(np.clip(risk, 0.0, 1.0))
         if selected_tickers:
+            forecast_start_date = date.today().isoformat()
             forecasts = [
                 self._ticker_forecast_payload(
                     ticker=ticker,
                     horizon_days=horizon_days,
                     window_size=window_size,
+                    forecast_start_date=forecast_start_date,
                 )
                 for ticker in selected_tickers
             ]
