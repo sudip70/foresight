@@ -12,3 +12,9 @@ services:
         value: /opt/render/project/src/artifacts/processed
       - key: STOCKIFY_DATASET_ROOT
         value: /opt/render/project/src/datasets/raw
+      - key: STOCKIFY_MARKET_DATA_PROVIDER
+        value: yfinance
+      - key: STOCKIFY_MARKET_INDEX_AUTO_REFRESH
+        value: "true"
+      - key: STOCKIFY_MARKET_INDEX_REFRESH_LOOKBACK_DAYS
+        value: "10"
