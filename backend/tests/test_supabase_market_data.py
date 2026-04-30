@@ -356,12 +356,20 @@ def test_forecast_engine_uses_stored_snapshot_for_default_horizon():
         window_size=20,
         prefer_snapshot=False,
     )
-    repository.upsert_forecasts([engine.forecast_snapshot_row(forecast)])
+    snapshot_row = engine.forecast_snapshot_row(forecast)
+    for path in snapshot_row["forecast_paths_json"].values():
+        for point in path:
+            point["date"] = (date(2025, 1, 1) + timedelta(days=point["day"])).isoformat()
+    repository.upsert_forecasts([snapshot_row])
 
     stored = engine.run_ticker_forecast(ticker="AAA", horizon_days=30, window_size=20)
 
     assert stored["snapshot_used"] is True
     assert stored["source"] == "supabase_forecast_snapshot"
+    today = date.today().isoformat()
+    assert stored["forecast_start_date"] == today
+    assert stored["forecast_paths"]["base"][0]["date"] == today
+    assert stored["latest_date"] == repository.coverage_for_ticker("AAA")["latest_date"]
 
 
 def test_forecast_engine_ignores_snapshot_that_does_not_match_latest_market_date():
@@ -421,6 +429,9 @@ def test_app_forecast_endpoints_work_from_market_repo_when_artifacts_are_broken(
         profile = client.get("/api/tickers/AAA/profile")
         assert profile.status_code == 200
         assert profile.json()["fields"]["pe_ratio"] is None
+        assert profile.json()["fields"]["sector"] == "Technology"
+        assert profile.json()["fields"]["industry"] == "Software"
+        assert profile.json()["fields"]["country"] == "US"
 
         repository.upsert_market_indices(
             [

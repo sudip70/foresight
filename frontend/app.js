@@ -2,15 +2,19 @@ const elements = {
   apiBase: document.querySelector("#apiBase"),
   apiStatus: document.querySelector("#apiStatus"),
   saveApiBase: document.querySelector("#saveApiBase"),
+  mobileMenuToggle: document.querySelector("#mobileMenuToggle"),
   amount: document.querySelector("#amount"),
   risk: document.querySelector("#risk"),
   riskValue: document.querySelector("#riskValue"),
   horizon: document.querySelector("#horizon"),
   windowSize: document.querySelector("#windowSize"),
   refreshDashboard: document.querySelector("#refreshDashboard"),
+  learnModeToggle: document.querySelector("#learnModeToggle"),
+  themeModeToggle: document.querySelector("#themeModeToggle"),
   marketAsOf: document.querySelector("#marketAsOf"),
   marketIndices: document.querySelector("#marketIndices"),
   marketHighlights: document.querySelector("#marketHighlights"),
+  marketLessonCards: document.querySelector("#marketLessonCards"),
   macroSnapshot: document.querySelector("#macroSnapshot"),
   marketTable: document.querySelector("#marketTable"),
   sentimentGaugeArc: document.querySelector("#sentimentGaugeArc"),
@@ -27,6 +31,7 @@ const elements = {
   chartFallback: document.querySelector("#chartFallback"),
   tickerMetricTitle: document.querySelector("#tickerMetricTitle"),
   tickerMetrics: document.querySelector("#tickerMetrics"),
+  forecastLessonContent: document.querySelector("#forecastLessonContent"),
   scenarioHorizonLabel: document.querySelector("#scenarioHorizonLabel"),
   scenarioPathSummary: document.querySelector("#scenarioPathSummary"),
   tickerInsights: document.querySelector("#tickerInsights"),
@@ -37,6 +42,7 @@ const elements = {
   runSimulation: document.querySelector("#runSimulation"),
   simulationSummary: document.querySelector("#simulationSummary"),
   simulationWarnings: document.querySelector("#simulationWarnings"),
+  portfolioClassroom: document.querySelector("#portfolioClassroom"),
   simulationClasses: document.querySelector("#simulationClasses"),
   simulationAssets: document.querySelector("#simulationAssets"),
   simulationTrades: document.querySelector("#simulationTrades"),
@@ -49,6 +55,10 @@ const elements = {
   healthBlock: document.querySelector("#healthBlock"),
   modelsBlock: document.querySelector("#modelsBlock"),
   refreshStatusBlock: document.querySelector("#refreshStatusBlock"),
+  projectStats: document.querySelector("#projectStats"),
+  projectHighlights: document.querySelector("#projectHighlights"),
+  projectTransparency: document.querySelector("#projectTransparency"),
+  glossaryList: document.querySelector("#glossaryList"),
   footerDataAsOf: document.querySelector("#footerDataAsOf"),
 };
 
@@ -66,19 +76,80 @@ const state = {
   chart: null,
   chartRange: "6m",
   currentForecast: null,
+  pendingForecastTicker: null,
+  sentiment: null,
+  classAllocationSegments: [],
+  learnMode: localStorage.getItem("foresight-learn-mode") === "true",
+  themeMode: localStorage.getItem("foresight-theme-mode") || "dark",
   controllers: {},
+  loaded: {
+    market: false,
+    forecast: false,
+    simulator: false,
+    diagnostics: false,
+  },
+  progress: {
+    actions: { market: false, forecast: false, simulation: false },
+    level: 1,
+  },
 };
 
-const literacy = {
-  bear: "Bear scenario: a weaker outcome estimated from return and volatility.",
-  base: "Base scenario: the central estimate, not a guaranteed target.",
-  bull: "Bull scenario: a stronger outcome if conditions are favorable.",
-  volatility: "Volatility estimates how much the price or portfolio may swing.",
-  drawdown: "Drawdown measures the largest historical drop from a previous high.",
-  confidence: "Confidence falls when data is noisy, volatile, or the forecast band is wide.",
-  sharpe: "Sharpe compares return against volatility. Higher is generally better.",
-  diversification: "Diversification spreads exposure so one asset does not dominate results.",
+const progressLevelLabels = {
+  1: "Level 1: Novice",
+  2: "Level 2: Intermediate",
+  3: "Level 3: Advanced",
 };
+
+const glossary = {
+  bear: {
+    title: "Bear scenario",
+    definition: "A weaker outcome that estimates what could happen if price and volatility move against the asset.",
+  },
+  base: {
+    title: "Base scenario",
+    definition: "The central estimate. It is useful for comparison, but it is not a guaranteed target.",
+  },
+  bull: {
+    title: "Bull scenario",
+    definition: "A stronger outcome that estimates potential upside if conditions are favorable.",
+  },
+  volatility: {
+    title: "Volatility",
+    definition: "A measure of how much prices may swing. Higher volatility usually means wider scenario ranges.",
+  },
+  drawdown: {
+    title: "Max drawdown",
+    definition: "The largest historical fall from a previous high. It helps explain downside pain, not just average return.",
+  },
+  confidence: {
+    title: "Confidence",
+    definition: "A model-readiness score that falls when history is thin, volatility is high, or scenario bands are wide.",
+  },
+  sharpe: {
+    title: "Sharpe ratio",
+    definition: "A risk-adjusted return measure. Higher values mean more return per unit of volatility in the backtest.",
+  },
+  diversification: {
+    title: "Diversification",
+    definition: "Spreading exposure across assets so one holding does not dominate the portfolio outcome.",
+  },
+  cash: {
+    title: "Cash buffer",
+    definition: "A lower-risk sleeve the simulator can hold when downside risk or uncertainty is elevated.",
+  },
+  spread: {
+    title: "Scenario spread",
+    definition: "The distance between bear and bull outcomes. A wider spread means the model sees more uncertainty.",
+  },
+  freshness: {
+    title: "Data freshness",
+    definition: "The latest market date used by the model. Fresh data matters because forecasts start from recent prices.",
+  },
+};
+
+const literacy = Object.fromEntries(
+  Object.entries(glossary).map(([key, value]) => [key, value.definition]),
+);
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat("en-US", {
@@ -173,11 +244,28 @@ function classCoverageLabel(universe) {
     .join(" / ");
 }
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => {
+    const entities = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;",
+    };
+    return entities[character];
+  });
+}
+
 function hasProfileValue(value) {
   if (value === null || value === undefined) return false;
   if (typeof value === "string") return value.trim() !== "";
   if (typeof value === "number") return Number.isFinite(value);
   return true;
+}
+
+function profileText(value) {
+  return hasProfileValue(value) ? String(value).trim() : "";
 }
 
 function signedPercentLabel(value) {
@@ -186,8 +274,133 @@ function signedPercentLabel(value) {
   return `${parsed >= 0 ? "+" : ""}${formatPercent(parsed)}`;
 }
 
+function assetClassNoun(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "etf") return "an ETF";
+  if (normalized === "crypto") return "a crypto asset";
+  if (normalized === "stock") return "a stock";
+  return normalized ? `a ${normalized}` : "an asset";
+}
+
+function buildTickerAboutParagraph(profile, forecast) {
+  const fields = profile?.fields || {};
+  const ticker = forecast?.ticker || profile?.ticker || "this ticker";
+  const name = profileText(profile?.display_name) || ticker;
+  const assetClass = String(profile?.asset_class || forecast?.asset_class || "").toLowerCase();
+  const sector = profileText(fields.sector);
+  const industry = profileText(fields.industry);
+  const exchange = profileText(fields.exchange);
+  const country = profileText(fields.country);
+  const categoryParts = [];
+
+  if (assetClass === "stock") {
+    if (sector) categoryParts.push(`in the ${sector} sector`);
+    if (industry) categoryParts.push(`categorized under ${industry}`);
+  } else if (assetClass === "etf") {
+    if (industry) categoryParts.push(`with ${industry} exposure`);
+    if (sector && sector.toLowerCase() !== "etf") categoryParts.push(`focused on ${sector}`);
+  } else if (assetClass === "crypto") {
+    if (industry) categoryParts.push(`categorized as ${industry}`);
+    if (sector && sector.toLowerCase() !== "crypto") categoryParts.push(`in the ${sector} sector`);
+  } else if (sector || industry) {
+    if (sector) categoryParts.push(`in the ${sector} sector`);
+    if (industry) categoryParts.push(`categorized under ${industry}`);
+  }
+
+  const category = categoryParts.length ? ` ${categoryParts.join(" and ")}` : "";
+  const listingParts = [];
+  if (exchange) listingParts.push(`trades on ${exchange}`);
+  if (country) listingParts.push(`is listed in ${country}`);
+  const listing = listingParts.length ? ` ${name} ${listingParts.join(" and ")}.` : "";
+  const horizon = forecast?.horizon_days ? `${forecast.horizon_days}-day` : "current";
+  const risk = profileText(forecast?.risk_label).toLowerCase() || "model-estimated";
+  const confidence = profileText(forecast?.confidence_label).toLowerCase() || "available";
+
+  return `${name} (${ticker}) is ${assetClassNoun(assetClass)}${category}.${listing} The current ${horizon} base scenario is ${signedPercentLabel(forecast?.returns?.base)} with ${risk} risk and ${confidence} confidence. This overview is for learning context and should be read alongside the scenario chart and profile metrics.`;
+}
+
+function renderTickerNarrative(profile, forecast, warnings = []) {
+  const about = profile ? `<p class="about-summary">${escapeHtml(buildTickerAboutParagraph(profile, forecast))}</p>` : "";
+  const warningBlock = warnings.length
+    ? `<div class="freshness-list">${warnings.map((warning) => `<span>${escapeHtml(warning)}</span>`).join("")}</div>`
+    : "";
+  elements.tickerNarrative.innerHTML = `
+    ${about}
+    <p>${escapeHtml(forecast.plain_language)}</p>
+    <p class="muted">${escapeHtml(forecast.literacy.bear_base_bull)}</p>
+    <div class="freshness-list">
+      <span>Market data as of ${escapeHtml(formatDate(forecast.data_as_of || forecast.latest_date))}</span>
+      <span>Forecast source: ${forecast.snapshot_used ? "stored daily snapshot" : "computed on request"}</span>
+    </div>
+    ${warningBlock}
+  `;
+}
+
 function toneForValue(value) {
   return Number(value || 0) >= 0 ? "positive" : "negative";
+}
+
+function hoverTooltip() {
+  let tooltip = document.querySelector(".hover-tooltip");
+  if (!tooltip) {
+    tooltip = document.createElement("div");
+    tooltip.className = "hover-tooltip";
+    document.body.appendChild(tooltip);
+  }
+  return tooltip;
+}
+
+function moveHoverTooltip(event) {
+  const tooltip = hoverTooltip();
+  tooltip.style.left = `${event.clientX}px`;
+  tooltip.style.top = `${event.clientY}px`;
+}
+
+function showHoverTooltip(event, content) {
+  const tooltip = hoverTooltip();
+  tooltip.innerHTML = content;
+  moveHoverTooltip(event);
+  tooltip.classList.add("is-visible");
+}
+
+function hideHoverTooltip() {
+  const tooltip = document.querySelector(".hover-tooltip");
+  if (tooltip) {
+    tooltip.classList.remove("is-visible");
+  }
+}
+
+function sentimentTooltipContent() {
+  if (!state.sentiment) return "";
+  return `
+    <strong>Market sentiment: ${state.sentiment.label}</strong>
+    <span>Score: ${state.sentiment.score}/100</span>
+    <span>Base scenario average: ${signedPercentLabel(state.sentiment.baseAverage)}</span>
+    <span>Bear scenario average: ${signedPercentLabel(state.sentiment.bearAverage)}</span>
+    <span>Confidence average: ${formatPercent(state.sentiment.confidenceAverage)}</span>
+  `;
+}
+
+function allocationSegmentAtPoint(event, donut) {
+  const segments = state.classAllocationSegments || [];
+  if (!segments.length) return null;
+  const rect = donut.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const dx = event.clientX - centerX;
+  const dy = event.clientY - centerY;
+  const angle = (Math.atan2(dy, dx) * (180 / Math.PI) + 450) % 360;
+  const position = angle / 360;
+  return segments.find((segment) => position >= segment.start && position <= segment.end) || segments.at(-1);
+}
+
+function allocationTooltipContent(segment) {
+  if (!segment) return "";
+  return `
+    <strong>${segment.label}</strong>
+    <span>${formatPercent(segment.weight)} of portfolio</span>
+    <span>${formatCurrency(segment.amount || 0)}</span>
+  `;
 }
 
 function sparklineSvg(change) {
@@ -207,19 +420,119 @@ function insight(message, tone = "info") {
 }
 
 function metricCard(label, value, tooltip, subtitle = "") {
-  const tip = tooltip ? `<span class="term" title="${tooltip}">?</span>` : "";
+  const tip = tooltip ? `<button class="why-btn" data-why="${label}: ${tooltip}" type="button">?</button>` : "";
   const detail = subtitle ? `<span class="metric-subtitle">${subtitle}</span>` : "";
   return `
     <article class="metric">
       <h3>${label} ${tip}</h3>
-      <strong>${value}</strong>
+      <strong class="animate-number">${value}</strong>
       ${detail}
+      <div class="why-popover-slot"></div>
     </article>
   `;
 }
 
+function lessonCard(title, body, detail = "") {
+  return `
+    <article class="lesson-card">
+      <strong>${title}</strong>
+      <p>${body}</p>
+      ${detail ? `<small>${detail}</small>` : ""}
+    </article>
+  `;
+}
+
+function termChip(key) {
+  const term = glossary[key];
+  if (!term) return "";
+  return `<span class="glossary-chip" data-term="${key}">${term.title}</span>`;
+}
+
+function cssVar(name, fallback = "") {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
+function riskPreferenceLabel(value) {
+  const risk = Number(value || 0);
+  if (risk >= 0.75) return "aggressive";
+  if (risk >= 0.45) return "balanced";
+  return "conservative";
+}
+
+function confidenceExplanation(confidence, label = "") {
+  const value = Number(confidence || 0);
+  if (value >= 0.7) {
+    return `${label || "High"} confidence means the model sees relatively stable data and a narrower scenario band.`;
+  }
+  if (value >= 0.45) {
+    return `${label || "Medium"} confidence means the forecast is usable for comparison, but the range still deserves attention.`;
+  }
+  return `${label || "Low"} confidence means the scenario is more uncertain, so the educational focus should be risk and assumptions.`;
+}
+
+function showToast(message, type = "info") {
+  const container = document.getElementById("toastContainer");
+  if (!container) return;
+  const icons = { info: "ℹ️", error: "❌", success: "✅" };
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span>${message}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => { toast.style.opacity = "0"; toast.style.transition = "opacity 200ms"; setTimeout(() => toast.remove(), 250); }, 4000);
+}
+
+function setLearnMode(enabled) {
+  state.learnMode = Boolean(enabled);
+  document.body.classList.toggle("learn-mode", state.learnMode);
+  if (elements.learnModeToggle) {
+    elements.learnModeToggle.classList.toggle("is-active", state.learnMode);
+    elements.learnModeToggle.setAttribute("aria-pressed", String(state.learnMode));
+    const badge = elements.learnModeToggle.querySelector(".toggle-badge");
+    if (badge) badge.textContent = state.learnMode ? "On" : "Off";
+  }
+  localStorage.setItem("foresight-learn-mode", String(state.learnMode));
+}
+
+function setThemeMode(mode) {
+  state.themeMode = mode === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = state.themeMode;
+  document.body.classList.toggle("theme-dark", state.themeMode === "dark");
+  if (elements.themeModeToggle) {
+    const isDark = state.themeMode === "dark";
+    elements.themeModeToggle.classList.toggle("is-active", isDark);
+    elements.themeModeToggle.setAttribute("aria-pressed", String(isDark));
+    const badge = elements.themeModeToggle.querySelector(".toggle-badge");
+    if (badge) badge.textContent = isDark ? "Dark" : "Light";
+  }
+  localStorage.setItem("foresight-theme-mode", state.themeMode);
+
+  if (state.currentForecast) {
+    renderForecastChart(state.currentForecast);
+  }
+}
+
+function renderGlossary() {
+  if (!elements.glossaryList) return;
+  elements.glossaryList.innerHTML = Object.values(glossary)
+    .map(
+      (term) => `
+        <article class="glossary-item">
+          <strong>${term.title}</strong>
+          <span>${term.definition}</span>
+        </article>
+      `,
+    )
+    .join("");
+}
+
 function setLoading(target, message = "Loading...") {
-  target.innerHTML = `<p class="muted">${message}</p>`;
+  target.innerHTML = `
+    <div class="skeleton">
+      <div class="skeleton-text"></div>
+      <div class="skeleton-text"></div>
+      <div class="skeleton-text"></div>
+    </div>
+  `;
 }
 
 function setError(target, message) {
@@ -227,9 +540,13 @@ function setError(target, message) {
 }
 
 async function callApi(path, options = {}) {
+  const headers = options.body ? { "Content-Type": "application/json" } : {};
   const response = await fetch(`${state.apiBase}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers: {
+      ...headers,
+      ...(options.headers || {}),
+    },
   });
   if (!response.ok) {
     const payload = await response.text();
@@ -288,8 +605,13 @@ function allocationPayload() {
 }
 
 function renderUniverse(universe) {
+  const assetClassOrder = { stock: 0, etf: 1, crypto: 2 };
+  const orderedGroups = [...universe.asset_classes].sort(
+    (left, right) =>
+      (assetClassOrder[left.asset_class] ?? 99) - (assetClassOrder[right.asset_class] ?? 99),
+  );
   const buildOptions = () =>
-    universe.asset_classes
+    orderedGroups
       .map(
         (group) => `
           <optgroup label="${group.asset_class}">
@@ -303,8 +625,9 @@ function renderUniverse(universe) {
 
   elements.tickerSelect.innerHTML = buildOptions();
   elements.simulationTickers.innerHTML = buildOptions();
-  if (universe.tickers.length > 0) {
-    elements.tickerSelect.value = universe.tickers[0].ticker;
+  const firstTicker = orderedGroups.find((group) => group.tickers.length > 0)?.tickers[0];
+  if (firstTicker) {
+    elements.tickerSelect.value = firstTicker.ticker;
   }
 }
 
@@ -390,6 +713,7 @@ function renderMarketSentiment(result) {
   );
   const label = score >= 70 ? "Bullish" : score >= 55 ? "Moderately bullish" : score >= 45 ? "Neutral" : "Cautious";
   elements.sentimentGaugeArc.style.setProperty("--gauge-deg", `${Math.round(score * 1.8)}deg`);
+  state.sentiment = { score, label, baseAverage, bearAverage, confidenceAverage };
   elements.sentimentScore.textContent = score;
   elements.sentimentLabel.textContent = label;
   elements.sentimentReasons.innerHTML = [
@@ -453,11 +777,44 @@ function renderMarketInsights(result) {
   ].join("");
 }
 
+function renderMarketLearning(result) {
+  if (!elements.marketLessonCards) return;
+  const ranked = result.ranked_tickers || [];
+  const bestBase = result.highlights?.best_base_case;
+  const downside = result.highlights?.highest_downside_risk;
+  const confidenceAverage =
+    ranked.reduce((total, entry) => total + Number(entry.confidence || 0), 0) /
+    Math.max(ranked.length, 1);
+  const baseAverage =
+    ranked.reduce((total, entry) => total + Number(entry.returns?.base || 0), 0) /
+    Math.max(ranked.length, 1);
+  elements.marketLessonCards.innerHTML = [
+    lessonCard(
+      "What am I looking at?",
+      `The market overview compares scenario estimates across the tracked universe. Focus on the relationship between ${termChip("base")}, ${termChip("bear")}, and ${termChip("confidence")}, not only the highest return.`,
+    ),
+    lessonCard(
+      "Why sentiment is not a signal",
+      `The sentiment score blends average base return (${signedPercentLabel(baseAverage)}) with downside and confidence. It is a summary of model conditions, not a buy or sell instruction.`,
+    ),
+    lessonCard(
+      "How to compare rows",
+      `${bestBase?.ticker || "The top row"} may have the highest base scenario, while ${downside?.ticker || "another asset"} may carry the largest downside. A beginner-friendly comparison always reads upside and downside together.`,
+    ),
+    lessonCard(
+      "Confidence check",
+      confidenceExplanation(confidenceAverage),
+      "Use confidence as a prompt to inspect assumptions before interpreting a scenario.",
+    ),
+  ].join("");
+}
+
 function renderMarket(result) {
   renderMacro(result.macro_snapshot);
   renderMarketSentiment(result);
   renderTopOpportunities(result);
   renderMarketInsights(result);
+  renderMarketLearning(result);
   if (elements.marketAsOf) {
     const dateText = result.macro_snapshot?.date || state.universe?.latest_date || "";
     elements.marketAsOf.textContent = `Live index performance and ranked opportunity scan${dateText ? ` - as of ${formatDate(dateText)}` : ""}.`;
@@ -504,13 +861,69 @@ function renderMarket(result) {
     `;
     elements.marketTable.appendChild(row);
   });
+  updateProgress("market");
+}
+
+function completedProgressCount() {
+  return Object.values(state.progress.actions).filter(Boolean).length;
+}
+
+function progressLevelFor(completed, total) {
+  if (completed >= total) return 3;
+  if (completed >= Math.ceil(total * 0.66)) return 2;
+  return 1;
+}
+
+function pulseProgressWidget() {
+  const widget = document.querySelector("#learningProgress");
+  if (!widget) return;
+  widget.classList.remove("level-up");
+  widget.offsetHeight;
+  widget.classList.add("level-up");
+  window.setTimeout(() => widget.classList.remove("level-up"), 900);
+}
+
+function launchLevelConfetti() {
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+    showToast("Level 3 reached", "success");
+    return;
+  }
+
+  document.querySelector(".confetti-burst")?.remove();
+  const widget = document.querySelector("#learningProgress");
+  const rect = widget?.getBoundingClientRect();
+  const originX = rect?.width ? rect.left + rect.width / 2 : window.innerWidth / 2;
+  const originY = rect?.height ? rect.top + rect.height / 2 : 96;
+  const colors = ["#21d59b", "#58a6ff", "#f5c542", "#ff6b8a", "#b78cff", "#ffffff"];
+  const burst = document.createElement("div");
+  burst.className = "confetti-burst";
+  burst.setAttribute("aria-hidden", "true");
+  burst.style.setProperty("--origin-x", `${originX}px`);
+  burst.style.setProperty("--origin-y", `${originY}px`);
+
+  for (let index = 0; index < 56; index += 1) {
+    const piece = document.createElement("span");
+    piece.className = "confetti-piece";
+    piece.style.setProperty("--x", `${Math.round((Math.random() - 0.5) * 420)}px`);
+    piece.style.setProperty("--y", `${Math.round(-120 - Math.random() * 300)}px`);
+    piece.style.setProperty("--r", `${Math.round((Math.random() - 0.5) * 720)}deg`);
+    piece.style.setProperty("--delay", `${Math.random() * 120}ms`);
+    piece.style.setProperty("--confetti-color", colors[index % colors.length]);
+    burst.appendChild(piece);
+  }
+
+  document.body.appendChild(burst);
+  showToast("Level 3 reached", "success");
+  window.setTimeout(() => burst.remove(), 1800);
 }
 
 function chartLabels(history, forecastPath) {
-  return [
-    ...history.map((point) => point.date),
-    ...forecastPath.slice(1).map((point) => point.date),
-  ];
+  const historyDates = history.map((point) => point.date);
+  const forecastDates = forecastPath.map((point) => point.date);
+  if (historyDates.at(-1) && historyDates.at(-1) === forecastDates[0]) {
+    return historyDates.concat(forecastDates.slice(1));
+  }
+  return historyDates.concat(forecastDates);
 }
 
 function visibleHistory(history) {
@@ -525,7 +938,8 @@ function visibleHistory(history) {
 }
 
 function forecastSeries(history, forecastPath) {
-  return Array(history.length - 1)
+  const startsAtHistoryEnd = history.at(-1)?.date === forecastPath[0]?.date;
+  return Array(startsAtHistoryEnd ? history.length - 1 : history.length)
     .fill(null)
     .concat(forecastPath.map((point) => point.price));
 }
@@ -539,11 +953,12 @@ function renderForecastChart(forecast) {
   const history = visibleHistory(forecast.historical_prices);
   const basePath = forecast.forecast_paths.base;
   const labels = chartLabels(history, basePath);
+  const startsAtHistoryEnd = history.at(-1)?.date === basePath[0]?.date;
   const historyData = history
     .map((point) => point.price)
-    .concat(Array(basePath.length - 1).fill(null));
+    .concat(Array(startsAtHistoryEnd ? basePath.length - 1 : basePath.length).fill(null));
   if (elements.forecastDateRange) {
-    const start = history[0]?.date;
+    const start = basePath[0]?.date || forecast.forecast_start_date;
     const end = forecast.forecast_paths.base.at(-1)?.date;
     elements.forecastDateRange.textContent = `${formatDate(start)} - ${formatDate(end)} Projection`;
   }
@@ -551,6 +966,11 @@ function renderForecastChart(forecast) {
   if (state.chart) {
     state.chart.destroy();
   }
+  const chartAccent = cssVar("--accent", "#008755");
+  const chartBlue = cssVar("--blue", "#1f66d1");
+  const chartDanger = cssVar("--danger", "#e1192d");
+  const chartGrid = cssVar("--chart-grid", "#edf2f7");
+  const chartText = cssVar("--muted", "#52617a");
   state.chart = new window.Chart(elements.forecastChart, {
     type: "line",
     data: {
@@ -559,7 +979,7 @@ function renderForecastChart(forecast) {
         {
           label: "Historical",
           data: historyData,
-          borderColor: "#008755",
+          borderColor: chartAccent,
           backgroundColor: "transparent",
           pointRadius: 0,
           borderWidth: 3,
@@ -567,7 +987,7 @@ function renderForecastChart(forecast) {
         {
           label: "Bull",
           data: forecastSeries(history, forecast.forecast_paths.bull),
-          borderColor: "#1f66d1",
+          borderColor: chartBlue,
           borderDash: [6, 4],
           pointRadius: 0,
           borderWidth: 2,
@@ -575,7 +995,7 @@ function renderForecastChart(forecast) {
         {
           label: "Base",
           data: forecastSeries(history, forecast.forecast_paths.base),
-          borderColor: "#008755",
+          borderColor: chartAccent,
           borderDash: [6, 4],
           pointRadius: 0,
           borderWidth: 2,
@@ -583,7 +1003,7 @@ function renderForecastChart(forecast) {
         {
           label: "Bear",
           data: forecastSeries(history, forecast.forecast_paths.bear),
-          borderColor: "#e1192d",
+          borderColor: chartDanger,
           borderDash: [6, 4],
           pointRadius: 0,
           borderWidth: 2,
@@ -604,12 +1024,13 @@ function renderForecastChart(forecast) {
       },
       scales: {
         x: {
-          grid: { color: "#edf2f7" },
-          ticks: { maxTicksLimit: 8 },
+          grid: { color: chartGrid },
+          ticks: { color: chartText, maxTicksLimit: 8 },
         },
         y: {
-          grid: { color: "#edf2f7" },
+          grid: { color: chartGrid },
           ticks: {
+            color: chartText,
             callback: (value) => formatCurrency(value),
           },
         },
@@ -618,9 +1039,37 @@ function renderForecastChart(forecast) {
   });
 }
 
+function renderForecastLearning(forecast) {
+  if (!elements.forecastLessonContent) return;
+  const spread = Number(forecast.returns.bull || 0) - Number(forecast.returns.bear || 0);
+  const volatility = Number(forecast.risk_metrics.annualized_volatility || 0);
+  const drawdown = Number(forecast.risk_metrics.max_historical_drawdown || 0);
+  const dataAsOf = forecast.data_as_of || forecast.latest_date;
+  const sourceLabel = forecast.snapshot_used ? "stored daily snapshot" : "computed on request";
+  elements.forecastLessonContent.innerHTML = [
+    lessonCard(
+      "Start with the scenario range",
+      `${termChip("bear")} is the weaker case, ${termChip("base")} is the central estimate, and ${termChip("bull")} is the stronger case. For ${forecast.ticker}, the base return is ${signedPercentLabel(forecast.returns.base)} over ${forecast.horizon_days} days.`,
+    ),
+    lessonCard(
+      "Read confidence as model readiness",
+      confidenceExplanation(forecast.confidence, forecast.confidence_label),
+      `Current confidence: ${formatPercent(forecast.confidence)}.`,
+    ),
+    `<article class="risk-checklist">
+      <strong>Risk checklist</strong>
+      <span>${termChip("volatility")} ${formatPercent(volatility)} annualized</span>
+      <span>${termChip("drawdown")} ${formatPercent(drawdown)} historical max drawdown</span>
+      <span>${termChip("spread")} ${formatPercent(spread)} between bear and bull outcomes</span>
+      <span>${termChip("freshness")} ${formatDate(dataAsOf)} · ${sourceLabel}</span>
+    </article>`,
+  ].join("");
+}
+
 function renderTickerForecast(forecast) {
   state.currentForecast = forecast;
   renderForecastChart(forecast);
+  renderForecastLearning(forecast);
   elements.tickerMetricTitle.textContent = `Scenario metrics - ${forecast.ticker}`;
   elements.tickerAboutTitle.textContent = `About ${forecast.ticker}`;
   elements.scenarioHorizonLabel.textContent = `(${forecast.horizon_days} days)`;
@@ -673,14 +1122,7 @@ function renderTickerForecast(forecast) {
       "info",
     ),
   ].join("");
-  elements.tickerNarrative.innerHTML = `
-    <p>${forecast.plain_language}</p>
-    <p class="muted">${forecast.literacy.bear_base_bull}</p>
-    <div class="freshness-list">
-      <span>Market data as of ${formatDate(forecast.data_as_of || forecast.latest_date)}</span>
-      <span>Forecast source: ${forecast.snapshot_used ? "stored daily snapshot" : "computed on request"}</span>
-    </div>
-  `;
+  renderTickerNarrative(null, forecast);
   if (elements.footerDataAsOf) {
     elements.footerDataAsOf.textContent = `Data as of ${formatDate(forecast.data_as_of || forecast.latest_date)}`;
   }
@@ -751,12 +1193,7 @@ function renderTickerProfile(profile, forecast) {
   if (profile.source === "local_artifacts") {
     warnings.push("Market cap, P/E, bid/ask, and dividend fields require refreshed profile snapshots from Supabase/yfinance.");
   }
-  if (warnings.length > 0) {
-    elements.tickerNarrative.insertAdjacentHTML(
-      "beforeend",
-      `<div class="freshness-list">${warnings.map((warning) => `<span>${warning}</span>`).join("")}</div>`,
-    );
-  }
+  renderTickerNarrative(profile, forecast, warnings);
 }
 
 function renderMetricBlock(target, entries) {
@@ -831,11 +1268,17 @@ function renderClassAllocation(allocations) {
   const etf = stock + (lookup.etf || 0);
   const crypto = etf + (lookup.crypto || 0);
   const rows = [
-    ["Stocks", lookup.stock || 0, "stock"],
-    ["ETFs", lookup.etf || 0, "etf"],
-    ["Crypto", lookup.crypto || 0, "crypto"],
-    ["Cash", lookup.cash || 0, "cash"],
+    ["Stocks", lookup.stock || 0, "stock", allocations?.find((entry) => entry.asset_class === "stock")?.amount],
+    ["ETFs", lookup.etf || 0, "etf", allocations?.find((entry) => entry.asset_class === "etf")?.amount],
+    ["Crypto", lookup.crypto || 0, "crypto", allocations?.find((entry) => entry.asset_class === "crypto")?.amount],
+    ["Cash", lookup.cash || 0, "cash", allocations?.find((entry) => entry.asset_class === "cash")?.amount],
   ].filter((row) => row[1] > 0.0001);
+  let cursor = 0;
+  state.classAllocationSegments = rows.map(([label, weight, key, amount]) => {
+    const start = cursor;
+    cursor += Number(weight || 0);
+    return { label, weight, key, amount, start, end: cursor };
+  });
   elements.simulationClasses.innerHTML = `
     <div class="allocation-view">
       <div class="allocation-donut" style="--stock: ${stock * 100}%; --etf: ${etf * 100}%; --crypto: ${crypto * 100}%;">
@@ -856,6 +1299,48 @@ function renderClassAllocation(allocations) {
       </div>
     </div>
   `;
+}
+
+function renderPortfolioLearning(result = state.simulation) {
+  if (!elements.portfolioClassroom) return;
+  const risk = Number(elements.risk.value || 0);
+  const horizon = Number(elements.horizon.value || 0);
+  const amount = Number(elements.amount.value || 0);
+  const riskLabel = riskPreferenceLabel(risk);
+  const classRows = result?.class_allocations || [];
+  const cashWeight = classRows.find((entry) => entry.asset_class === "cash")?.weight;
+  const cryptoWeight = classRows.find((entry) => entry.asset_class === "crypto")?.weight;
+  const spread =
+    result?.summary
+      ? Math.max(Number(result.summary.bull_return || 0) - Number(result.summary.bear_return || 0), 0)
+      : null;
+
+  elements.portfolioClassroom.innerHTML = [
+    lessonCard(
+      "Risk appetite",
+      `Your current setting is ${risk.toFixed(2)}, which reads as a ${riskLabel} classroom profile. Higher risk can allow more volatile assets; lower risk usually favors more cash and steadier sleeves.`,
+      `${termChip("volatility")} and ${termChip("drawdown")} are the key concepts to watch.`,
+    ),
+    lessonCard(
+      "Cash buffer",
+      result
+        ? `The simulation currently holds ${formatPercent(cashWeight || 0)} in cash. Cash can reduce downside exposure, but it may also reduce upside in bull scenarios.`
+        : "Run the simulation to see how much cash the model keeps aside for the selected risk and horizon.",
+      termChip("cash"),
+    ),
+    lessonCard(
+      "Scenario spread",
+      result
+        ? `The distance between simulated bear and bull returns is ${formatPercent(spread)}. A wider spread means the outcome is more uncertain.`
+        : "After a simulation, this panel will explain how far apart the bear and bull outcomes are.",
+      termChip("spread"),
+    ),
+    lessonCard(
+      "Horizon and amount",
+      `The classroom is modeling ${formatCurrency(amount)} over ${formatInteger(horizon)} days. Longer horizons give the model more time for compounding, but they also extend uncertainty.`,
+      cryptoWeight ? `Crypto weight in the latest simulation: ${formatPercent(cryptoWeight)}.` : "",
+    ),
+  ].join("");
 }
 
 function renderSimulation(result) {
@@ -897,6 +1382,7 @@ function renderSimulation(result) {
   renderClassAllocation(result.class_allocations);
   renderAllocationTable(elements.simulationAssets, result.asset_allocations, { limit: 10 });
   renderTradePlan(elements.simulationTrades, result.trade_plan);
+  renderPortfolioLearning(result);
   if (elements.footerDataAsOf && state.universe?.latest_date) {
     elements.footerDataAsOf.textContent = `Data as of ${formatDate(state.universe.latest_date)}`;
   }
@@ -976,6 +1462,67 @@ function renderDataHealthCards() {
       <small>${isMissing(confidence) ? models?.explainability?.method || "Scenario diagnostics pending" : `Avg confidence · ${backtestSubtitle}`}</small>
     </article>`,
   ].join("");
+  renderProjectStory();
+}
+
+function renderProjectStory() {
+  if (!elements.projectStats) return;
+  const health = state.health || {};
+  const models = state.models || {};
+  const refresh = state.refreshStatus || {};
+  const latestRun = refresh.latest_run || {};
+  const latestMarketDate = refresh.latest_market_date || state.universe?.latest_date || latestRun.completed_at;
+  const assetCount = refresh.asset_count ?? state.universe?.tickers?.length;
+  const featureGroups = models.feature_groups ? Object.keys(models.feature_groups).length : 0;
+  const explainability = models.explainability?.method || "surrogate explainability";
+  const statusLabel = state.health
+    ? health.ready === false
+      ? "Degraded"
+      : "Healthy"
+    : "Pending";
+  const statusClass = state.health ? (health.ready === false ? "negative" : "positive") : "";
+
+  elements.projectStats.innerHTML = [
+    `<article><span>Tracked universe</span><strong>${formatInteger(assetCount)}</strong><small>${classCoverageLabel(state.universe)}</small></article>`,
+    `<article><span>Latest data</span><strong>${formatDate(latestMarketDate)}</strong><small>${latestRun.mode || "artifact or market refresh"}</small></article>`,
+    `<article><span>Backend status</span><strong class="${statusClass}">${statusLabel}</strong><small>FastAPI inference service</small></article>`,
+  ].join("");
+
+  if (elements.projectHighlights) {
+    elements.projectHighlights.innerHTML = [
+      lessonCard(
+        "Full-stack product thinking",
+        "The project connects a beginner-friendly interface to real backend APIs, model artifacts, refresh jobs, and portfolio simulation logic.",
+      ),
+      lessonCard(
+        "ML system design",
+        `The backend exposes model metadata, ${formatInteger(featureGroups)} feature groups, forecasts, simulations, backtests, and ${explainability}.`,
+      ),
+      lessonCard(
+        "Education-first UX",
+        "Learn Mode reframes outputs as lessons: what the metric means, why it matters, and what risk to inspect next.",
+      ),
+    ].join("");
+  }
+
+  if (elements.projectTransparency) {
+    elements.projectTransparency.innerHTML = [
+      lessonCard(
+        "Data freshness",
+        `The app reports the latest market date (${formatDate(latestMarketDate)}) so users know what data the model used.`,
+        termChip("freshness"),
+      ),
+      lessonCard(
+        "Model limitations",
+        "The UI explicitly frames forecasts as educational estimates. It avoids promising returns and keeps scenario outputs separate from advice.",
+      ),
+      lessonCard(
+        "Validation story",
+        "The repo includes backend API tests, synthetic fixture artifacts, refresh diagnostics, and backtest metrics to support reliability conversations in interviews.",
+      ),
+    ].join("");
+  }
+  renderGlossary();
 }
 
 async function refreshDiagnostics() {
@@ -1016,6 +1563,12 @@ async function loadUniverse() {
   renderDataHealthCards();
 }
 
+async function ensureUniverse() {
+  if (!state.universe) {
+    await loadUniverse();
+  }
+}
+
 async function runMarketForecast() {
   setLoading(elements.marketTable);
   setLoading(elements.marketHighlights);
@@ -1023,6 +1576,7 @@ async function runMarketForecast() {
   setLoading(elements.marketInsightList);
   setLoading(elements.topOpportunities);
   setLoading(elements.sentimentReasons);
+  setLoading(elements.marketLessonCards);
   try {
     const [indexResult, marketResult] = await Promise.allSettled([
       callSectionApi("marketIndices", "/api/market/indices"),
@@ -1047,6 +1601,7 @@ async function runMarketForecast() {
     setError(elements.marketIndices, "Market index data unavailable.");
     setError(elements.marketInsightList, "Market insights unavailable.");
     setError(elements.topOpportunities, "Top opportunities unavailable.");
+    setError(elements.marketLessonCards, "Market lesson unavailable.");
     throw error;
   }
 }
@@ -1056,6 +1611,7 @@ async function runTickerForecast(ticker = elements.tickerSelect.value) {
   setLoading(elements.tickerProfile);
   setLoading(elements.scenarioPathSummary);
   setLoading(elements.tickerInsights);
+  setLoading(elements.forecastLessonContent);
   elements.tickerNarrative.innerHTML = "";
   try {
     const [result, profile] = await Promise.all([
@@ -1072,12 +1628,14 @@ async function runTickerForecast(ticker = elements.tickerSelect.value) {
     elements.tickerSelect.value = result.ticker;
     renderTickerForecast(result);
     renderTickerProfile(profile, result);
+    updateProgress("forecast");
   } catch (error) {
     if (isAbort(error)) return;
     setError(elements.tickerMetrics, `Ticker forecast unavailable: ${error.message}`);
     setError(elements.tickerProfile, "Company data unavailable.");
     setError(elements.scenarioPathSummary, "Scenario summary unavailable.");
     setError(elements.tickerInsights, "Ticker insights unavailable.");
+    setError(elements.forecastLessonContent, "Forecast lesson unavailable.");
     throw error;
   }
 }
@@ -1088,6 +1646,7 @@ async function runSimulation() {
   setLoading(elements.simulationAssets);
   setLoading(elements.simulationTrades);
   setLoading(elements.simulationWarnings);
+  setLoading(elements.portfolioClassroom);
   const selected = selectedSimulationTickers();
   try {
     const result = await callSectionApi("simulation", "/api/portfolio/simulations", {
@@ -1100,10 +1659,12 @@ async function runSimulation() {
       }),
     });
     renderSimulation(result);
+    updateProgress("simulation");
   } catch (error) {
     if (isAbort(error)) return;
     setError(elements.simulationSummary, `Simulation unavailable: ${error.message}`);
     setError(elements.simulationWarnings, "Simulation insights unavailable.");
+    setError(elements.portfolioClassroom, "Portfolio classroom unavailable.");
     throw error;
   }
 }
@@ -1148,23 +1709,56 @@ async function runBacktest() {
   }
 }
 
+function activeTabName() {
+  return document.querySelector(".view.is-active")?.id || "market";
+}
+
+function resetLoadedViews() {
+  state.loaded = {
+    market: false,
+    forecast: false,
+    simulator: false,
+    diagnostics: false,
+  };
+  state.backtest = null;
+}
+
+async function refreshDiagnosticsInBackground() {
+  if (state.loaded.diagnostics) return;
+  try {
+    await refreshDiagnostics();
+    state.loaded.diagnostics = true;
+  } catch (error) {
+    if (isAbort(error)) return;
+  }
+}
+
+async function refreshActiveView({ force = false } = {}) {
+  const tabName = activeTabName();
+  if (force) {
+    state.loaded[tabName] = false;
+  }
+  if (tabName === "market" && !state.loaded.market) {
+    await runMarketForecast();
+    state.loaded.market = true;
+  } else if (tabName === "forecast" && !state.loaded.forecast) {
+    await ensureUniverse();
+    const ticker = state.pendingForecastTicker || elements.tickerSelect.value;
+    await runTickerForecast(ticker);
+    state.pendingForecastTicker = null;
+    state.loaded.forecast = true;
+  } else if (tabName === "simulator" && !state.loaded.simulator) {
+    await ensureUniverse();
+    await runSimulation();
+    state.loaded.simulator = true;
+  }
+  refreshDiagnosticsInBackground();
+}
+
 async function refreshDashboard() {
-  elements.apiStatus.textContent = "Connecting to backend...";
+  elements.apiStatus.textContent = "Refreshing current view...";
   elements.apiStatus.className = "muted";
-  if (!state.universe) {
-    await loadUniverse();
-  }
-  await refreshDiagnostics();
-  const results = await Promise.allSettled([
-    runMarketForecast(),
-    runTickerForecast(),
-    runSimulation(),
-    runBacktest(),
-  ]);
-  const failed = results.slice(0, 3).filter((result) => result.status === "rejected");
-  if (failed.length > 0) {
-    throw failed[0].reason;
-  }
+  await refreshActiveView({ force: true });
   elements.apiStatus.textContent = "Backend connected.";
   elements.apiStatus.className = "status-good";
 }
@@ -1177,7 +1771,11 @@ async function probeBackend() {
     if (health.status !== "ok" || health.ready === false) {
       throw new Error(health.error || "Backend is not ready");
     }
-    await refreshDashboard();
+    state.health = health;
+    renderDataHealthCards();
+    await refreshActiveView({ force: true });
+    elements.apiStatus.textContent = "Backend connected.";
+    elements.apiStatus.className = "status-good";
   } catch (error) {
     if (isAbort(error)) return;
     elements.apiStatus.textContent = `Set your backend URL, then click Use Backend. ${error.message}`;
@@ -1186,19 +1784,58 @@ async function probeBackend() {
     setError(elements.marketIndices, "Backend is not connected.");
     setError(elements.tickerMetrics, "Backend is not connected.");
     setError(elements.simulationSummary, "Backend is not connected.");
+    const emptyState = document.getElementById("marketEmptyState");
+    if (emptyState) emptyState.classList.add("is-visible");
   }
 }
 
-document.querySelectorAll(".tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach((node) => node.classList.remove("is-active"));
-    document.querySelectorAll(".view").forEach((node) => node.classList.remove("is-active"));
-    tab.classList.add("is-active");
-    document.querySelector(`#${tab.dataset.tab}`).classList.add("is-active");
-    if (tab.dataset.tab === "forecast" && state.chart) {
-      requestAnimationFrame(() => state.chart.resize());
-    }
+function switchTab(tabName) {
+  document.querySelectorAll(".nav-item, .mobile-nav-item").forEach((n) => n.classList.remove("is-active"));
+  document.querySelectorAll(".view").forEach((n) => n.classList.remove("is-active"));
+  document.querySelectorAll(`[data-tab="${tabName}"]`).forEach((n) => n.classList.add("is-active"));
+  const view = document.querySelector(`#${tabName}`);
+  if (view) view.classList.add("is-active");
+  closeMobileMenu();
+  const shell = document.querySelector(".app-shell");
+  shell?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  if (tabName === "forecast" && state.chart) {
+    requestAnimationFrame(() => state.chart.resize());
+  }
+  refreshActiveView().catch((error) => {
+    if (!isAbort(error)) showToast(error.message, "error");
   });
+}
+
+function setMobileMenu(open) {
+  const sidebar = document.querySelector(".sidebar");
+  sidebar?.classList.toggle("is-mobile-open", open);
+  document.body.classList.toggle("mobile-sidebar-open", open);
+  elements.mobileMenuToggle?.setAttribute("aria-expanded", String(open));
+  if (elements.mobileMenuToggle) {
+    elements.mobileMenuToggle.textContent = open ? "×" : "☰";
+  }
+}
+
+function closeMobileMenu() {
+  setMobileMenu(false);
+}
+
+document.querySelectorAll(".nav-item, .mobile-nav-item").forEach((btn) => {
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+});
+
+elements.mobileMenuToggle?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const isOpen = document.querySelector(".sidebar")?.classList.contains("is-mobile-open");
+  setMobileMenu(!isOpen);
+});
+
+document.addEventListener("click", (event) => {
+  const sidebar = document.querySelector(".sidebar");
+  if (!sidebar?.classList.contains("is-mobile-open")) return;
+  if (sidebar.contains(event.target) || elements.mobileMenuToggle?.contains(event.target)) return;
+  closeMobileMenu();
 });
 
 document.querySelectorAll(".range-button").forEach((button) => {
@@ -1212,21 +1849,70 @@ document.querySelectorAll(".range-button").forEach((button) => {
   });
 });
 
+const sentimentGauge = elements.sentimentGaugeArc?.closest(".sentiment-gauge");
+sentimentGauge?.addEventListener("pointermove", (event) => {
+  const content = sentimentTooltipContent();
+  if (content) showHoverTooltip(event, content);
+});
+sentimentGauge?.addEventListener("pointerleave", hideHoverTooltip);
+
+elements.simulationClasses.addEventListener("pointermove", (event) => {
+  const donut = event.target.closest(".allocation-donut");
+  if (!donut) {
+    hideHoverTooltip();
+    return;
+  }
+  const segment = allocationSegmentAtPoint(event, donut);
+  if (segment) showHoverTooltip(event, allocationTooltipContent(segment));
+});
+elements.simulationClasses.addEventListener("pointerleave", hideHoverTooltip);
+
 elements.marketTable.addEventListener("click", (event) => {
   const button = event.target.closest("[data-view-ticker]");
   if (!button) return;
-  document.querySelector('[data-tab="forecast"]').click();
-  runTickerForecast(button.dataset.viewTicker).catch((error) => alert(error.message));
+  state.pendingForecastTicker = button.dataset.viewTicker;
+  state.loaded.forecast = false;
+  switchTab("forecast");
 });
 
 elements.risk.addEventListener("input", () => {
   elements.riskValue.textContent = Number(elements.risk.value).toFixed(2);
+  state.loaded.market = false;
+  state.loaded.forecast = false;
+  state.loaded.simulator = false;
+  renderPortfolioLearning();
+});
+
+elements.horizon.addEventListener("input", () => {
+  state.loaded.market = false;
+  state.loaded.forecast = false;
+  state.loaded.simulator = false;
+  renderPortfolioLearning();
+});
+elements.amount.addEventListener("input", () => {
+  state.loaded.simulator = false;
+  state.backtest = null;
+  renderPortfolioLearning();
+});
+elements.tickerSelect.addEventListener("change", () => {
+  state.loaded.forecast = false;
+});
+
+elements.learnModeToggle?.addEventListener("click", (e) => {
+  e.preventDefault();
+  setLearnMode(!state.learnMode);
+});
+
+elements.themeModeToggle?.addEventListener("click", (e) => {
+  e.preventDefault();
+  setThemeMode(state.themeMode === "dark" ? "light" : "dark");
 });
 
 elements.saveApiBase.addEventListener("click", async () => {
   state.apiBase = elements.apiBase.value.replace(/\/$/, "");
   localStorage.setItem("foresight-api-base", state.apiBase);
   state.universe = null;
+  resetLoadedViews();
   await refreshDashboard().catch((error) => {
     elements.apiStatus.textContent = `Backend unavailable: ${error.message}`;
     elements.apiStatus.className = "status-bad";
@@ -1240,19 +1926,190 @@ elements.refreshDashboard.addEventListener("click", () =>
     elements.apiStatus.className = "status-bad";
   }),
 );
-elements.runTickerForecast.addEventListener("click", () =>
-  runTickerForecast().catch((error) => alert(error.message)),
-);
-elements.runSimulation.addEventListener("click", () =>
-  runSimulation().catch((error) => alert(error.message)),
-);
+elements.runTickerForecast.addEventListener("click", () => {
+  runTickerForecast()
+    .then(() => {
+      state.loaded.forecast = true;
+    })
+    .catch((error) => showToast(error.message, "error"));
+});
+elements.runSimulation.addEventListener("click", () => {
+  runSimulation()
+    .then(() => {
+      state.loaded.simulator = true;
+    })
+    .catch((error) => showToast(error.message, "error"));
+});
 elements.runRlAllocation.addEventListener("click", () =>
-  runRlAllocation().catch((error) => alert(error.message)),
+  runRlAllocation().catch((error) => showToast(error.message, "error")),
 );
 elements.runBacktest.addEventListener("click", () =>
-  runBacktest().catch((error) => alert(error.message)),
+  runBacktest().catch((error) => showToast(error.message, "error")),
 );
 
 elements.apiBase.value = state.apiBase;
 elements.riskValue.textContent = Number(elements.risk.value).toFixed(2);
+setLearnMode(state.learnMode);
+setThemeMode(state.themeMode);
+renderPortfolioLearning();
+renderProjectStory();
+renderGlossary();
 probeBackend();
+
+function updateProgress(action) {
+  if (!state.progress.actions[action]) {
+    state.progress.actions[action] = true;
+  }
+  const previousLevel = state.progress.level;
+  const completed = completedProgressCount();
+  const total = Object.keys(state.progress.actions).length;
+  const nextLevel = progressLevelFor(completed, total);
+  const bar = document.querySelector(".progress-bar");
+  const text = document.querySelector(".progress-text");
+  const level = document.querySelector(".progress-level");
+
+  state.progress.level = nextLevel;
+  if (bar) bar.style.width = `${(completed / total) * 100}%`;
+  if (text) text.textContent = `${completed}/${total} tasks completed`;
+  if (level) level.textContent = progressLevelLabels[nextLevel];
+
+  if (nextLevel > previousLevel) {
+    pulseProgressWidget();
+  }
+  if (previousLevel < 3 && nextLevel === 3) {
+    launchLevelConfetti();
+  }
+}
+
+document.body.addEventListener("mouseover", (event) => {
+  const chip = event.target.closest(".glossary-chip");
+  if (chip) {
+    const key = chip.dataset.term;
+    const term = glossary[key];
+    if (term) {
+      showHoverTooltip(event, `<strong>${term.title}</strong><span>${term.definition}</span>`);
+    }
+  }
+});
+
+document.body.addEventListener("mouseout", (event) => {
+  if (event.target.closest(".glossary-chip")) {
+    hideHoverTooltip();
+  }
+});
+
+// ── Command Palette ──
+const cmdOverlay = document.getElementById("commandPalette");
+const cmdInput = document.getElementById("cmdInput");
+const cmdResults = document.getElementById("cmdResults");
+
+function openCommandPalette() {
+  if (!cmdOverlay) return;
+  cmdOverlay.classList.add("is-open");
+  cmdOverlay.setAttribute("aria-hidden", "false");
+  cmdInput.value = "";
+  cmdInput.focus();
+  renderCmdResults("");
+}
+
+function closeCommandPalette() {
+  if (!cmdOverlay) return;
+  cmdOverlay.classList.remove("is-open");
+  cmdOverlay.setAttribute("aria-hidden", "true");
+}
+
+function renderCmdResults(query) {
+  if (!cmdResults) return;
+  const q = query.toLowerCase().trim();
+  const results = [];
+  const tabs = [
+    { label: "Market overview", tab: "market", icon: "📊" },
+    { label: "Ticker forecast", tab: "forecast", icon: "📈" },
+    { label: "Portfolio simulator", tab: "simulator", icon: "🧪" },
+    { label: "Project story", tab: "project", icon: "📖" },
+  ];
+  tabs.forEach((t) => {
+    if (!q || t.label.toLowerCase().includes(q)) {
+      results.push({ ...t, type: "Tab" });
+    }
+  });
+  Object.entries(glossary).forEach(([key, term]) => {
+    if (!q || term.title.toLowerCase().includes(q) || term.definition.toLowerCase().includes(q)) {
+      results.push({ label: term.title, icon: "📘", type: "Glossary", key });
+    }
+  });
+  if (state.universe) {
+    state.universe.tickers.forEach((entry) => {
+      if (!q || entry.ticker.toLowerCase().includes(q)) {
+        results.push({ label: entry.ticker, icon: "📈", type: "Ticker", ticker: entry.ticker });
+      }
+    });
+  }
+  cmdResults.innerHTML = results.slice(0, 12).map((r) => `
+    <div class="cmd-result-item" data-cmd-type="${r.type}" data-cmd-value="${r.tab || r.key || r.ticker || ""}">
+      <span>${r.icon}</span>
+      <span>${r.label}</span>
+      <span class="cmd-result-type">${r.type}</span>
+    </div>
+  `).join("") || `<div class="cmd-result-item"><span>No results</span></div>`;
+}
+
+cmdInput?.addEventListener("input", () => renderCmdResults(cmdInput.value));
+cmdOverlay?.addEventListener("click", (e) => {
+  if (e.target === cmdOverlay) closeCommandPalette();
+});
+cmdResults?.addEventListener("click", (e) => {
+  const item = e.target.closest(".cmd-result-item");
+  if (!item) return;
+  const type = item.dataset.cmdType;
+  const value = item.dataset.cmdValue;
+  if (type === "Tab" && value) switchTab(value);
+  if (type === "Ticker" && value) {
+    switchTab("forecast");
+    elements.tickerSelect.value = value;
+    runTickerForecast(value).catch((err) => showToast(err.message, "error"));
+  }
+  if (type === "Glossary" && value) {
+    switchTab("project");
+  }
+  closeCommandPalette();
+});
+
+document.getElementById("openCmdPalette")?.addEventListener("click", openCommandPalette);
+
+// ── Keyboard Shortcuts ──
+document.addEventListener("keydown", (e) => {
+  if (cmdOverlay?.classList.contains("is-open")) {
+    if (e.key === "Escape") { closeCommandPalette(); return; }
+    return;
+  }
+  const tag = document.activeElement?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+    e.preventDefault();
+    openCommandPalette();
+    return;
+  }
+  if (e.key === "Escape") closeMobileMenu();
+  if (e.key === "1") switchTab("market");
+  if (e.key === "2") switchTab("forecast");
+  if (e.key === "3") switchTab("simulator");
+  if (e.key === "4") switchTab("project");
+  if (e.key.toLowerCase() === "l") setLearnMode(!state.learnMode);
+  if (e.key.toLowerCase() === "d") setThemeMode(state.themeMode === "dark" ? "light" : "dark");
+});
+
+// ── Why Button Click Handler ──
+document.body.addEventListener("click", (e) => {
+  const btn = e.target.closest(".why-btn");
+  if (!btn) return;
+  const metric = btn.closest(".metric");
+  if (!metric) return;
+  const slot = metric.querySelector(".why-popover-slot");
+  if (!slot) return;
+  if (slot.innerHTML) {
+    slot.innerHTML = "";
+  } else {
+    slot.innerHTML = `<div class="why-popover">${btn.dataset.why}</div>`;
+  }
+});

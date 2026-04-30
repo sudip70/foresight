@@ -3,282 +3,492 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Foresight</title>
+    <script>
+      try {
+        const savedTheme = localStorage.getItem("foresight-theme-mode");
+        document.documentElement.dataset.theme = savedTheme === "light" ? "light" : "dark";
+      } catch {
+        document.documentElement.dataset.theme = "dark";
+      }
+    </script>
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   </head>
   <body>
-    <header class="app-header">
-      <div class="brand" aria-label="Foresight market intelligence">
-        <span class="brand-name">Foresight</span>
-        <span class="brand-kicker">Market<br />Intelligence</span>
-      </div>
-      <nav class="tabs" aria-label="Dashboard sections">
-        <button class="tab is-active" data-tab="market">Market overview</button>
-        <button class="tab" data-tab="forecast">Ticker forecast</button>
-        <button class="tab" data-tab="simulator">Portfolio simulator</button>
-      </nav>
-      <details class="settings-menu">
-        <summary class="icon-button" aria-label="Settings"></summary>
-        <div class="settings-panel">
-          <label for="apiBase">Backend URL</label>
-          <input id="apiBase" type="url" value="http://localhost:8000" />
-          <label for="windowSize">Estimator window</label>
-          <input id="windowSize" type="number" min="2" value="60" step="1" />
-          <button id="saveApiBase">Use Backend</button>
-          <p id="apiStatus" class="muted">Waiting for connection.</p>
+
+    <!-- Command Palette Overlay -->
+    <div id="commandPalette" class="cmd-palette-overlay" aria-hidden="true">
+      <div class="cmd-palette">
+        <div class="cmd-input-wrap">
+          <span class="cmd-icon">⌘</span>
+          <input id="cmdInput" type="text" placeholder="Search tickers, tabs, glossary..." autocomplete="off" />
+          <kbd class="cmd-kbd">ESC</kbd>
         </div>
-      </details>
-    </header>
+        <div id="cmdResults" class="cmd-results"></div>
+      </div>
+    </div>
 
-    <section class="control-bar" aria-label="Global simulation controls">
-      <div class="control-field amount-field">
-        <label for="amount">Investment</label>
-        <input id="amount" type="number" min="1000" value="10000" step="500" />
-      </div>
-      <span class="control-divider" aria-hidden="true"></span>
-      <div class="control-field risk-field">
-        <label for="risk">Risk</label>
-        <input id="risk" type="range" min="0" max="1" step="0.01" value="0.5" />
-        <span id="riskValue">0.50</span>
-      </div>
-      <span class="control-divider" aria-hidden="true"></span>
-      <div class="control-field horizon-field">
-        <label for="horizon">Horizon (days)</label>
-        <input id="horizon" type="number" min="1" value="300" step="1" />
-      </div>
-      <button id="refreshDashboard" class="secondary-button">Refresh</button>
-    </section>
+    <!-- Toast Container -->
+    <div id="toastContainer" class="toast-container" aria-live="polite"></div>
 
-    <main class="app-shell">
-      <section id="market" class="workspace view is-active">
-        <div class="section-head">
-          <div>
-            <h1>Market overview</h1>
-            <p id="marketAsOf" class="muted">
-              Live index performance and ranked opportunity scan.
-            </p>
+    <!-- App Layout: Sidebar + Content -->
+    <div class="app-layout">
+
+      <!-- Sidebar Navigation -->
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <span class="brand-name">Foresight</span>
+          <span class="brand-kicker">Market Intelligence</span>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="Dashboard sections">
+          <button class="nav-item is-active" data-tab="market">
+            <span class="nav-icon">📊</span>
+            <span class="nav-label">Market</span>
+          </button>
+          <button class="nav-item" data-tab="forecast">
+            <span class="nav-icon">📈</span>
+            <span class="nav-label">Forecast</span>
+          </button>
+          <button class="nav-item" data-tab="simulator">
+            <span class="nav-icon">🧪</span>
+            <span class="nav-label">Simulator</span>
+          </button>
+          <button class="nav-item" data-tab="project">
+            <span class="nav-icon">📖</span>
+            <span class="nav-label">Project</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-search">
+          <button id="openCmdPalette" class="cmd-trigger">
+            <span>Search...</span>
+            <kbd>⌘K</kbd>
+          </button>
+        </div>
+
+        <div id="learningProgress" class="learning-progress" aria-label="Learning Progress">
+          <div class="progress-info">
+            <span class="progress-level">Level 1: Novice</span>
+            <span class="progress-text">0/3 tasks completed</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-bar" style="width: 0%"></div>
           </div>
         </div>
 
-        <div id="marketIndices" class="index-strip"></div>
-        <div id="marketHighlights" class="metric-grid highlights"></div>
+        <div class="sidebar-bottom">
+          <div class="sidebar-toggles">
+            <button id="learnModeToggle" class="sidebar-toggle-btn" type="button" aria-pressed="false">
+              <span class="nav-icon">🎓</span>
+              <span class="nav-label">Learn Mode</span>
+              <span class="toggle-badge">Off</span>
+            </button>
+            <button id="themeModeToggle" class="sidebar-toggle-btn" type="button" aria-pressed="false">
+              <span class="nav-icon">🌙</span>
+              <span class="nav-label">Theme</span>
+              <span class="toggle-badge">Dark</span>
+            </button>
+          </div>
+          <details class="settings-menu">
+            <summary class="sidebar-settings-btn" aria-label="Settings">
+              <span class="nav-icon">⚙</span>
+              <span class="nav-label">Settings</span>
+            </summary>
+            <div class="settings-panel">
+              <label for="apiBase">Backend URL</label>
+              <input id="apiBase" type="url" value="http://localhost:8000" />
+              <label for="windowSize">Estimator window</label>
+              <input id="windowSize" type="number" min="2" value="60" step="1" />
+              <button id="saveApiBase">Use Backend</button>
+              <p id="apiStatus" class="muted">Waiting for connection.</p>
+            </div>
+          </details>
+        </div>
+      </aside>
 
-        <div class="market-grid">
-          <article class="surface macro-card">
-            <h2>Macro snapshot</h2>
-            <div id="macroSnapshot" class="stack"></div>
-          </article>
-          <article class="surface opportunity-card">
-            <h2>Opportunity ranking</h2>
-            <div id="marketTable" class="data-table wide-table"></div>
-            <div class="info-note">
-              Base is the expected return under normal conditions. Bear and bull are downside
-              and upside scenario projections. Confidence reflects model certainty.
-            </div>
-          </article>
-          <article class="surface sentiment-card">
-            <h2>Market sentiment</h2>
-            <div class="sentiment-gauge" aria-label="Market sentiment score">
-              <div id="sentimentGaugeArc" class="gauge-arc"></div>
-              <div class="gauge-value">
-                <strong id="sentimentScore">--</strong>
-                <span>/100</span>
-              </div>
-              <p id="sentimentLabel">Waiting for market data</p>
-            </div>
-            <div id="sentimentReasons" class="sentiment-list"></div>
-          </article>
+      <!-- Mobile Top Bar -->
+      <header class="mobile-topbar">
+        <span class="brand-name">Foresight</span>
+        <button id="mobileMenuToggle" class="mobile-menu-btn" aria-label="Menu" aria-expanded="false">☰</button>
+      </header>
+
+      <!-- Main Content Area -->
+      <main class="app-shell">
+
+        <!-- Keyboard shortcuts hint -->
+        <div class="keyboard-hint" id="keyboardHint">
+          Press <kbd>1</kbd>-<kbd>4</kbd> to switch tabs · <kbd>⌘K</kbd> to search · <kbd>L</kbd> learn mode · <kbd>D</kbd> dark mode
         </div>
 
-        <div class="lower-grid">
+        <section id="market" class="workspace view is-active">
+          <div class="section-head sticky-head">
+            <div>
+              <h1>Market overview</h1>
+              <p id="marketAsOf" class="muted">
+                Live index performance and ranked opportunity scan.
+              </p>
+            </div>
+          </div>
+
+          <!-- Empty state (shown when no backend is connected) -->
+          <div id="marketEmptyState" class="empty-state">
+            <div class="empty-state-icon">📡</div>
+            <h2>Connect your backend</h2>
+            <p>Configure your backend URL in Settings to start exploring market data, forecasts, and portfolio simulations.</p>
+            <button class="empty-state-btn" onclick="document.querySelector('.settings-menu').open = true">Configure Backend →</button>
+          </div>
+
+          <div id="marketIndices" class="index-strip"></div>
+          <div id="marketHighlights" class="metric-grid highlights"></div>
+
+          <article id="marketLearnPanel" class="surface learn-panel">
+            <div>
+              <span class="eyebrow">Learn mode</span>
+              <h2>Reading the market overview</h2>
+              <p>
+                This page teaches how a model turns market data into scenarios. The ranking is not a
+                buy list; it is a way to compare upside, downside, and confidence side by side.
+              </p>
+            </div>
+            <div id="marketLessonCards" class="lesson-grid"></div>
+          </article>
+
+          <div class="market-grid">
+            <article class="surface macro-card">
+              <h2>Macro snapshot</h2>
+              <div id="macroSnapshot" class="stack"></div>
+            </article>
+            <article class="surface opportunity-card">
+              <h2>Opportunity ranking</h2>
+              <div id="marketTable" class="data-table wide-table"></div>
+              <div class="info-note">
+                Base is the expected return under normal conditions. Bear and bull are downside
+                and upside scenario projections. Confidence reflects model certainty.
+              </div>
+            </article>
+            <article class="surface sentiment-card">
+              <h2>Market sentiment</h2>
+              <div class="sentiment-gauge" aria-label="Market sentiment score">
+                <div id="sentimentGaugeArc" class="gauge-arc"></div>
+                <div class="gauge-value">
+                  <strong id="sentimentScore" class="animate-number">--</strong>
+                  <span>/100</span>
+                </div>
+                <p id="sentimentLabel">Waiting for market data</p>
+              </div>
+              <div id="sentimentReasons" class="sentiment-list"></div>
+            </article>
+          </div>
+
+          <div class="lower-grid">
+            <article class="surface">
+              <h2>Key insights</h2>
+              <div id="marketInsightList" class="insight-list"></div>
+            </article>
+            <article class="surface">
+              <div class="card-title-row">
+                <h2>Top opportunities <span>(by base return)</span></h2>
+              </div>
+              <div id="topOpportunities" class="data-table"></div>
+            </article>
+          </div>
+
+          <article class="surface diagnostics-card">
+            <h2>Diagnostics and data health</h2>
+            <div id="dataHealthCards" class="health-grid"></div>
+            <details class="diagnostics">
+              <summary>View raw diagnostics</summary>
+              <div class="diagnostics-grid">
+                <article class="json-panel">
+                  <h3>Health</h3>
+                  <pre id="healthBlock" class="json-block"></pre>
+                </article>
+                <article class="json-panel">
+                  <h3>Models</h3>
+                  <pre id="modelsBlock" class="json-block"></pre>
+                </article>
+                <article class="json-panel">
+                  <h3>Refresh status</h3>
+                  <pre id="refreshStatusBlock" class="json-block"></pre>
+                </article>
+              </div>
+            </details>
+          </article>
+        </section>
+
+        <section id="forecast" class="workspace view">
+          <div class="section-head with-actions sticky-head">
+            <div>
+              <h1>Ticker forecast</h1>
+              <p class="muted">
+                Historical price with bear, base, and bull scenario paths projected forward.
+              </p>
+            </div>
+            <div class="ticker-actions">
+              <select id="tickerSelect" aria-label="Ticker"></select>
+              <button id="runTickerForecast">Run forecast</button>
+            </div>
+          </div>
+
+          <div class="forecast-layout">
+            <div class="forecast-main">
+              <article class="surface chart-surface">
+                <div class="chart-toolbar">
+                  <div class="range-tabs" aria-label="Chart history range">
+                    <button class="range-button" data-range="1m">1M</button>
+                    <button class="range-button" data-range="3m">3M</button>
+                    <button class="range-button is-active" data-range="6m">6M</button>
+                    <button class="range-button" data-range="1y">1Y</button>
+                    <button class="range-button" data-range="all">ALL</button>
+                  </div>
+                  <p id="forecastDateRange" class="muted">Projection</p>
+                </div>
+                <div class="chart-legend" aria-hidden="true">
+                  <span class="legend-item historical">Historical / Base</span>
+                  <span class="legend-item bull">Bull scenario</span>
+                  <span class="legend-item base">Base scenario</span>
+                  <span class="legend-item bear">Bear scenario</span>
+                </div>
+                <div class="chart-frame">
+                  <canvas id="forecastChart" aria-label="Ticker forecast chart"></canvas>
+                </div>
+                <div id="chartFallback" class="muted"></div>
+                <div class="info-note">
+                  <strong>Understanding scenario paths</strong>
+                  <span>
+                    These are model-generated probability-weighted projections, not guarantees.
+                    The base path reflects the central estimate while bear and bull paths show
+                    downside and upside ranges.
+                  </span>
+                </div>
+              </article>
+
+              <article class="surface scenario-card">
+                <h2>Scenario path summary <span id="scenarioHorizonLabel"></span></h2>
+                <div id="scenarioPathSummary" class="scenario-grid"></div>
+                <h2>Key insights</h2>
+                <div id="tickerInsights" class="insight-list"></div>
+              </article>
+            </div>
+
+            <aside class="forecast-side">
+              <article id="forecastLearnPanel" class="surface learn-panel lesson-card">
+                <span class="eyebrow">Forecast classroom</span>
+                <h2>How to read this forecast</h2>
+                <div id="forecastLessonContent" class="lesson-stack"></div>
+              </article>
+              <article class="surface">
+                <h2 id="tickerMetricTitle">Scenario metrics</h2>
+                <div id="tickerMetrics" class="metric-grid compact"></div>
+                <div class="info-note compact-note">
+                  <strong>What is max drawdown?</strong>
+                  <span>
+                    The largest peak-to-trough decline observed in the simulation window.
+                  </span>
+                </div>
+              </article>
+              <article class="surface">
+                <h2>Company data</h2>
+                <div id="tickerProfile" class="profile-grid"></div>
+              </article>
+              <article class="surface">
+                <h2 id="tickerAboutTitle">About ticker</h2>
+                <div id="tickerNarrative" class="narrative"></div>
+              </article>
+            </aside>
+          </div>
+        </section>
+
+        <section id="simulator" class="workspace view">
+          <div class="section-head with-actions sticky-head">
+            <div>
+              <h1>Portfolio simulator</h1>
+              <p class="muted">
+                Forecast-ranked asset allocation with bear, base, and bull portfolio values.
+              </p>
+            </div>
+            <div class="simulator-actions">
+              <button id="runSimulation">Run simulation</button>
+              <details class="selection-menu">
+                <summary class="icon-button dots" aria-label="Optional ticker selection"></summary>
+                <div class="settings-panel selection-panel">
+                  <label for="simulationTickers">Optional ticker selection</label>
+                  <select id="simulationTickers" multiple size="8"></select>
+                </div>
+              </details>
+            </div>
+          </div>
+
+          <article class="surface simulation-settings">
+            <div class="simulation-settings-head">
+              <span class="eyebrow">Allocation settings</span>
+              <h2>Portfolio inputs</h2>
+              <p class="muted">
+                Set the amount, risk appetite, and horizon used by the portfolio classroom.
+              </p>
+            </div>
+            <div class="control-bar" aria-label="Portfolio allocation settings">
+              <div class="control-field amount-field">
+                <label for="amount">Investment</label>
+                <input id="amount" type="number" min="1000" value="10000" step="500" />
+              </div>
+              <span class="control-divider" aria-hidden="true"></span>
+              <div class="control-field risk-field">
+                <label for="risk">Risk</label>
+                <input id="risk" type="range" min="0" max="1" step="0.01" value="0.5" />
+                <span id="riskValue">0.50</span>
+              </div>
+              <span class="control-divider" aria-hidden="true"></span>
+              <div class="control-field horizon-field">
+                <label for="horizon">Horizon (days)</label>
+                <input id="horizon" type="number" min="1" value="300" step="1" />
+              </div>
+              <button id="refreshDashboard" class="secondary-button">Refresh data</button>
+            </div>
+          </article>
+
+          <div id="simulationSummary" class="portfolio-summary"></div>
+
+          <article id="simulatorLearnPanel" class="surface learn-panel">
+            <div>
+              <span class="eyebrow">Portfolio classroom</span>
+              <h2>How risk settings change the simulation</h2>
+              <p>
+                The simulator shows how asset mix, cash buffer, downside value, and confidence move
+                when you change risk appetite or horizon. It is an educational sandbox, not a trade
+                instruction.
+              </p>
+            </div>
+            <div id="portfolioClassroom" class="lesson-grid"></div>
+          </article>
+
+          <div class="portfolio-grid">
+            <article class="surface allocation-card">
+              <h2>Class allocation</h2>
+              <div id="simulationClasses"></div>
+              <div class="info-note">
+                <strong>Why hold cash?</strong>
+                <span>
+                  The model reserves a cash buffer based on risk appetite and scenario balance.
+                </span>
+              </div>
+            </article>
+            <article class="surface">
+              <h2>Asset allocation <span>(base scenario)</span></h2>
+              <div id="simulationAssets" class="data-table"></div>
+            </article>
+            <article class="surface">
+              <h2>Simulation example trades <span>(base scenario)</span></h2>
+              <div id="simulationTrades" class="data-table"></div>
+            </article>
+          </div>
+
           <article class="surface">
             <h2>Key insights</h2>
-            <div id="marketInsightList" class="insight-list"></div>
+            <div id="simulationWarnings" class="insight-list"></div>
           </article>
-          <article class="surface">
-            <div class="card-title-row">
-              <h2>Top opportunities <span>(by base return)</span></h2>
-            </div>
-            <div id="topOpportunities" class="data-table"></div>
-          </article>
-        </div>
 
-        <article class="surface diagnostics-card">
-          <h2>Diagnostics and data health</h2>
-          <div id="dataHealthCards" class="health-grid"></div>
-          <details class="diagnostics">
-            <summary>View raw diagnostics</summary>
+          <details class="advanced-diagnostics">
+            <summary>Advanced diagnostics and backtest metrics</summary>
+            <div class="diagnostic-actions">
+              <button id="runRlAllocation">Run RL allocation snapshot</button>
+              <button id="runBacktest">Run RL backtest</button>
+            </div>
             <div class="diagnostics-grid">
-              <article class="json-panel">
-                <h3>Health</h3>
-                <pre id="healthBlock" class="json-block"></pre>
+              <article>
+                <h2>RL allocation summary</h2>
+                <div id="rlSummary" class="metric-grid compact"></div>
+                <div id="rlClasses" class="data-table"></div>
               </article>
-              <article class="json-panel">
-                <h3>Models</h3>
-                <pre id="modelsBlock" class="json-block"></pre>
-              </article>
-              <article class="json-panel">
-                <h3>Refresh status</h3>
-                <pre id="refreshStatusBlock" class="json-block"></pre>
+              <article>
+                <h2>Backtest metrics</h2>
+                <div id="backtestSummary" class="metric-grid compact"></div>
+                <div id="backtestWarnings" class="stack"></div>
               </article>
             </div>
           </details>
-        </article>
-      </section>
+        </section>
 
-      <section id="forecast" class="workspace view">
-        <div class="section-head with-actions">
-          <div>
-            <h1>Ticker forecast</h1>
-            <p class="muted">
-              Historical price with bear, base, and bull scenario paths projected forward.
-            </p>
-          </div>
-          <div class="ticker-actions">
-            <select id="tickerSelect" aria-label="Ticker"></select>
-            <button id="runTickerForecast">Run forecast</button>
-          </div>
-        </div>
-
-        <div class="forecast-layout">
-          <div class="forecast-main">
-            <article class="surface chart-surface">
-              <div class="chart-toolbar">
-                <div class="range-tabs" aria-label="Chart history range">
-                  <button class="range-button" data-range="1m">1M</button>
-                  <button class="range-button" data-range="3m">3M</button>
-                  <button class="range-button is-active" data-range="6m">6M</button>
-                  <button class="range-button" data-range="1y">1Y</button>
-                  <button class="range-button" data-range="all">ALL</button>
-                </div>
-                <p id="forecastDateRange" class="muted">Projection</p>
-              </div>
-              <div class="chart-legend" aria-hidden="true">
-                <span class="legend-item historical">Historical / Base</span>
-                <span class="legend-item bull">Bull scenario</span>
-                <span class="legend-item base">Base scenario</span>
-                <span class="legend-item bear">Bear scenario</span>
-              </div>
-              <div class="chart-frame">
-                <canvas id="forecastChart" aria-label="Ticker forecast chart"></canvas>
-              </div>
-              <div id="chartFallback" class="muted"></div>
-              <div class="info-note">
-                <strong>Understanding scenario paths</strong>
-                <span>
-                  These are model-generated probability-weighted projections, not guarantees.
-                  The base path reflects the central estimate while bear and bull paths show
-                  downside and upside ranges.
-                </span>
-              </div>
-            </article>
-
-            <article class="surface scenario-card">
-              <h2>Scenario path summary <span id="scenarioHorizonLabel"></span></h2>
-              <div id="scenarioPathSummary" class="scenario-grid"></div>
-              <h2>Key insights</h2>
-              <div id="tickerInsights" class="insight-list"></div>
-            </article>
-          </div>
-
-          <aside class="forecast-side">
-            <article class="surface">
-              <h2 id="tickerMetricTitle">Scenario metrics</h2>
-              <div id="tickerMetrics" class="metric-grid compact"></div>
-              <div class="info-note compact-note">
-                <strong>What is max drawdown?</strong>
-                <span>
-                  The largest peak-to-trough decline observed in the simulation window.
-                </span>
-              </div>
-            </article>
-            <article class="surface">
-              <h2>Company data</h2>
-              <div id="tickerProfile" class="profile-grid"></div>
-            </article>
-            <article class="surface">
-              <h2 id="tickerAboutTitle">About ticker</h2>
-              <div id="tickerNarrative" class="narrative"></div>
-            </article>
-          </aside>
-        </div>
-      </section>
-
-      <section id="simulator" class="workspace view">
-        <div class="section-head with-actions">
-          <div>
-            <h1>Portfolio simulator</h1>
-            <p class="muted">
-              Forecast-ranked asset allocation with bear, base, and bull portfolio values.
-            </p>
-          </div>
-          <div class="simulator-actions">
-            <button id="runSimulation">Run simulation</button>
-            <details class="selection-menu">
-              <summary class="icon-button dots" aria-label="Optional ticker selection"></summary>
-              <div class="settings-panel selection-panel">
-                <label for="simulationTickers">Optional ticker selection</label>
-                <select id="simulationTickers" multiple size="8"></select>
-              </div>
-            </details>
-          </div>
-        </div>
-
-        <div id="simulationSummary" class="portfolio-summary"></div>
-
-        <div class="portfolio-grid">
-          <article class="surface allocation-card">
-            <h2>Class allocation</h2>
-            <div id="simulationClasses"></div>
-            <div class="info-note">
-              <strong>Why hold cash?</strong>
-              <span>
-                The model reserves a cash buffer based on risk appetite and scenario balance.
-              </span>
+        <section id="project" class="workspace view">
+          <div class="section-head sticky-head">
+            <div>
+              <h1>Project story</h1>
+              <p class="muted">
+                A full-stack ML financial literacy product built for beginner-friendly market education.
+              </p>
             </div>
-          </article>
-          <article class="surface">
-            <h2>Asset allocation <span>(base scenario)</span></h2>
-            <div id="simulationAssets" class="data-table"></div>
-          </article>
-          <article class="surface">
-            <h2>Trade plan <span>(base scenario)</span></h2>
-            <div id="simulationTrades" class="data-table"></div>
-          </article>
-        </div>
-
-        <article class="surface">
-          <h2>Key insights</h2>
-          <div id="simulationWarnings" class="insight-list"></div>
-        </article>
-
-        <details class="advanced-diagnostics">
-          <summary>Advanced diagnostics and backtest metrics</summary>
-          <div class="diagnostic-actions">
-            <button id="runRlAllocation">Run RL allocation snapshot</button>
-            <button id="runBacktest">Run RL backtest</button>
           </div>
-          <div class="diagnostics-grid">
-            <article>
-              <h2>RL allocation summary</h2>
-              <div id="rlSummary" class="metric-grid compact"></div>
-              <div id="rlClasses" class="data-table"></div>
+
+          <article class="project-hero surface">
+            <div>
+              <span class="eyebrow">Portfolio showcase</span>
+              <h2>Foresight turns forecasts into financial literacy lessons.</h2>
+              <p>
+                The app combines market data refresh jobs, FastAPI inference routes, ML/RL allocation
+                artifacts, scenario forecasting, backtests, explainability, and a polished frontend
+                into one learning-oriented product.
+              </p>
+            </div>
+            <div id="projectStats" class="project-stats"></div>
+          </article>
+
+          <div class="project-grid">
+            <article class="surface">
+              <h2>System architecture</h2>
+              <div class="architecture-flow">
+                <span>Market data</span>
+                <span>Feature pipeline</span>
+                <span>Forecast engine</span>
+                <span>Learning UI</span>
+              </div>
+              <p class="muted">
+                yfinance and Supabase-backed data feeds are transformed into aligned artifacts and
+                forecast snapshots, then served through FastAPI to the static frontend.
+              </p>
             </article>
-            <article>
-              <h2>Backtest metrics</h2>
-              <div id="backtestSummary" class="metric-grid compact"></div>
-              <div id="backtestWarnings" class="stack"></div>
+            <article class="surface">
+              <h2>What this demonstrates</h2>
+              <div id="projectHighlights" class="lesson-stack"></div>
             </article>
           </div>
-        </details>
-      </section>
 
-      <footer class="app-footer">
-        <span>Forecasts are estimates and should be reviewed before making investment decisions. Past performance does not guarantee future results.</span>
-        <span id="footerDataAsOf">Data pending</span>
-      </footer>
-    </main>
+          <div class="project-grid">
+            <article class="surface">
+              <h2>Model transparency</h2>
+              <div id="projectTransparency" class="lesson-stack"></div>
+            </article>
+            <article class="surface">
+              <h2>Learning glossary</h2>
+              <div id="glossaryList" class="glossary-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <footer class="app-footer">
+          <span>Educational simulations only. Forecasts are model estimates, not investment advice, and past performance does not guarantee future results.</span>
+          <span id="footerDataAsOf">Data pending</span>
+        </footer>
+      </main>
+    </div>
+
+    <!-- Mobile Bottom Nav -->
+    <nav class="mobile-bottom-nav" aria-label="Mobile navigation">
+      <button class="mobile-nav-item is-active" data-tab="market">
+        <span>📊</span><span>Market</span>
+      </button>
+      <button class="mobile-nav-item" data-tab="forecast">
+        <span>📈</span><span>Forecast</span>
+      </button>
+      <button class="mobile-nav-item" data-tab="simulator">
+        <span>🧪</span><span>Simulator</span>
+      </button>
+      <button class="mobile-nav-item" data-tab="project">
+        <span>📖</span><span>Project</span>
+      </button>
+    </nav>
 
     <script src="./app.js" type="module"></script>
   </body>

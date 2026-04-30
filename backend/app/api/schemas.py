@@ -55,6 +55,7 @@ class TickerForecastResponse(BaseModel):
     ticker: str
     asset_class: str
     latest_date: str
+    forecast_start_date: str | None = None
     latest_price: float
     horizon_days: int
     historical_prices: list[dict[str, Any]]

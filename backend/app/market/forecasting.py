@@ -42,6 +42,34 @@ def _date_add_days(value: str, days: int) -> str:
     return (date.fromisoformat(value) + timedelta(days=int(days))).isoformat()
 
 
+def _forecast_start_date() -> str:
+    return date.today().isoformat()
+
+
+def _rebase_forecast_paths(
+    forecast_paths: dict[str, Any],
+    forecast_start_date: str,
+) -> dict[str, list[dict[str, Any]]]:
+    rebased: dict[str, list[dict[str, Any]]] = {}
+    for scenario, path in forecast_paths.items():
+        if not isinstance(path, list):
+            continue
+        scenario_path = []
+        for index, point in enumerate(path):
+            if not isinstance(point, dict):
+                continue
+            day = int(point.get("day", index))
+            scenario_path.append(
+                {
+                    **point,
+                    "day": day,
+                    "date": _date_add_days(forecast_start_date, day),
+                }
+            )
+        rebased[str(scenario)] = scenario_path
+    return rebased
+
+
 def _historical_drawdown(prices: np.ndarray) -> float:
     series = np.asarray(prices, dtype=float).reshape(-1)
     if series.shape[0] <= 1:
@@ -111,6 +139,9 @@ class SupabaseForecastEngine:
     def __init__(self, repository: MarketDataRepository, settings: Settings) -> None:
         self.repository = repository
         self.settings = settings
+        self._market_forecast_cache: dict[tuple[int, int, str], list[dict[str, Any]]] = {}
+        self._macro_payload_cache: dict[str, Any] | None = None
+        self._universe_payload_cache: dict[str, Any] | None = None
 
     def _cash_daily_return(self) -> float:
         return float((1.0 + self.settings.meta_cash_annual_return) ** (1.0 / 252.0) - 1.0)
@@ -223,6 +254,7 @@ class SupabaseForecastEngine:
         *,
         latest_price: float,
         latest_date: str,
+        forecast_start_date: str,
         daily_mu: float,
         daily_volatility: float,
         horizon_days: int,
@@ -265,7 +297,7 @@ class SupabaseForecastEngine:
             path.append(
                 {
                     "day": int(day),
-                    "date": _date_add_days(latest_date, int(day)),
+                    "date": _date_add_days(forecast_start_date, int(day)),
                     "price": float(projected),
                 }
             )
@@ -277,6 +309,7 @@ class SupabaseForecastEngine:
         metadata: dict[str, Any],
         rows: list[dict[str, Any]],
         snapshot: dict[str, Any],
+        forecast_start_date: str | None = None,
     ) -> dict[str, Any]:
         ticker = metadata["ticker"]
         asset_class = metadata["asset_class"]
@@ -289,6 +322,8 @@ class SupabaseForecastEngine:
         forecast_paths = snapshot.get("forecast_paths_json") or {}
         if isinstance(forecast_paths, str):
             forecast_paths = json.loads(forecast_paths)
+        forecast_start_date = forecast_start_date or _forecast_start_date()
+        forecast_paths = _rebase_forecast_paths(forecast_paths, forecast_start_date)
         returns = {
             "bear": _as_float(snapshot.get("bear_return")),
             "base": _as_float(snapshot.get("base_return")),
@@ -312,6 +347,7 @@ class SupabaseForecastEngine:
             "ticker": ticker,
             "asset_class": asset_class,
             "latest_date": dates[-1],
+            "forecast_start_date": forecast_start_date,
             "latest_price": _as_float(snapshot.get("latest_price"), float(prices[-1])),
             "horizon_days": int(snapshot["horizon_days"]),
             "historical_prices": historical_prices,
@@ -350,6 +386,59 @@ class SupabaseForecastEngine:
             "snapshot_used": True,
         }
 
+    def _market_payload_from_snapshot(
+        self,
+        *,
+        metadata: dict[str, Any],
+        snapshot: dict[str, Any],
+        forecast_start_date: str,
+    ) -> dict[str, Any]:
+        ticker = metadata["ticker"]
+        returns = {
+            "bear": _as_float(snapshot.get("bear_return")),
+            "base": _as_float(snapshot.get("base_return")),
+            "bull": _as_float(snapshot.get("bull_return")),
+        }
+        max_drawdown = _as_float(snapshot.get("drawdown"))
+        annualized_volatility = _as_float(snapshot.get("volatility"))
+        confidence = _as_float(snapshot.get("confidence"), 0.05)
+        confidence_label = snapshot.get("confidence_label") or _confidence_label(confidence)
+        target_prices = {
+            "bear": _as_float(snapshot.get("bear_target")),
+            "base": _as_float(snapshot.get("base_target")),
+            "bull": _as_float(snapshot.get("bull_target")),
+        }
+        return {
+            "ticker": ticker,
+            "asset_class": metadata["asset_class"],
+            "latest_date": str(snapshot.get("as_of_date") or ""),
+            "forecast_start_date": forecast_start_date,
+            "latest_price": _as_float(snapshot.get("latest_price")),
+            "horizon_days": int(snapshot["horizon_days"]),
+            "target_prices": target_prices,
+            "returns": returns,
+            "risk_metrics": {
+                "model_estimated_daily_return": _as_float(snapshot.get("base_return"))
+                / max(int(snapshot["horizon_days"]), 1),
+                "annualized_return": _as_float(snapshot.get("base_return")),
+                "annualized_volatility": annualized_volatility,
+                "max_historical_drawdown": max_drawdown,
+                "forecast_spread": max(returns["bull"] - returns["bear"], 0.0),
+                "regime_stability": 1.0,
+            },
+            "confidence": confidence,
+            "confidence_label": confidence_label,
+            "risk_label": _risk_label(annualized_volatility, max_drawdown),
+            "return_estimator": {
+                "method": "stored_supabase_snapshot",
+                "method_version": snapshot.get("method_version", FORECAST_METHOD_VERSION),
+                "snapshot_as_of": snapshot.get("as_of_date"),
+            },
+            "data_as_of": str(snapshot.get("as_of_date") or ""),
+            "source": "supabase_forecast_snapshot",
+            "snapshot_used": True,
+        }
+
     def _literacy_payload(self) -> dict[str, str]:
         return {
             "bear_base_bull": "Bear, base, and bull are scenario ranges, not guaranteed prices.",
@@ -365,9 +454,11 @@ class SupabaseForecastEngine:
         horizon_days: int,
         window_size: int = 60,
         prefer_snapshot: bool = True,
+        forecast_start_date: str | None = None,
     ) -> dict[str, Any]:
         metadata, rows = self._ticker_rows(ticker)
         prices, dates = self._prepare_price_series(rows)
+        forecast_start_date = forecast_start_date or _forecast_start_date()
         if prefer_snapshot:
             snapshot = self.repository.get_forecast_snapshot(
                 ticker=metadata["ticker"],
@@ -379,6 +470,7 @@ class SupabaseForecastEngine:
                     metadata=metadata,
                     rows=rows,
                     snapshot=snapshot,
+                    forecast_start_date=forecast_start_date,
                 )
 
         asset_class = metadata["asset_class"]
@@ -394,6 +486,7 @@ class SupabaseForecastEngine:
         bear_path = self._scenario_path(
             latest_price=latest_price,
             latest_date=latest_date,
+            forecast_start_date=forecast_start_date,
             daily_mu=daily_mu,
             daily_volatility=daily_volatility,
             horizon_days=horizon,
@@ -403,6 +496,7 @@ class SupabaseForecastEngine:
         base_path = self._scenario_path(
             latest_price=latest_price,
             latest_date=latest_date,
+            forecast_start_date=forecast_start_date,
             daily_mu=daily_mu,
             daily_volatility=daily_volatility,
             horizon_days=horizon,
@@ -412,6 +506,7 @@ class SupabaseForecastEngine:
         bull_path = self._scenario_path(
             latest_price=latest_price,
             latest_date=latest_date,
+            forecast_start_date=forecast_start_date,
             daily_mu=daily_mu,
             daily_volatility=daily_volatility,
             horizon_days=horizon,
@@ -467,6 +562,7 @@ class SupabaseForecastEngine:
             "ticker": metadata["ticker"],
             "asset_class": asset_class,
             "latest_date": latest_date,
+            "forecast_start_date": forecast_start_date,
             "latest_price": latest_price,
             "horizon_days": horizon,
             "historical_prices": historical_prices,
@@ -522,39 +618,37 @@ class SupabaseForecastEngine:
         }
 
     def universe_payload(self) -> dict[str, Any]:
+        if self._universe_payload_cache is not None:
+            return self._universe_payload_cache
         universe = self.repository.list_universe()
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         all_tickers = []
-        latest_dates = []
         for row in universe:
-            coverage = self.repository.coverage_for_ticker(row["ticker"])
             entry = {
                 "ticker": row["ticker"],
                 "asset_class": row["asset_class"],
                 "display_name": row.get("display_name"),
-                "latest_date": coverage.get("latest_date"),
-                "latest_price": coverage.get("latest_price"),
-                "history_days": int(coverage.get("row_count") or 0),
-                "first_date": coverage.get("first_date"),
-                "row_count": int(coverage.get("row_count") or 0),
-                "has_profile": bool(coverage.get("has_profile")),
-                "profile_as_of_date": coverage.get("profile_as_of_date"),
+                "latest_date": None,
+                "latest_price": None,
+                "history_days": 0,
+                "first_date": None,
+                "row_count": 0,
+                "has_profile": False,
+                "profile_as_of_date": None,
                 "min_history_days": row.get("min_history_days"),
             }
-            if entry["latest_date"]:
-                latest_dates.append(entry["latest_date"])
             grouped[row["asset_class"]].append(entry)
             all_tickers.append(entry)
         asset_classes = [
             {
                 "asset_class": asset_class,
                 "tickers": tickers,
-                "history_days": max((ticker["history_days"] for ticker in tickers), default=0),
+                "history_days": 0,
             }
             for asset_class, tickers in sorted(grouped.items())
         ]
-        return {
-            "latest_date": max(latest_dates) if latest_dates else "",
+        payload = {
+            "latest_date": "",
             "supported_asset_classes": [group["asset_class"] for group in asset_classes],
             "asset_classes": asset_classes,
             "tickers": all_tickers,
@@ -564,6 +658,8 @@ class SupabaseForecastEngine:
                 "or guaranteed returns."
             ),
         }
+        self._universe_payload_cache = payload
+        return payload
 
     def market_indices_payload(self) -> dict[str, Any]:
         rows = self.repository.list_latest_market_indices()
@@ -609,6 +705,11 @@ class SupabaseForecastEngine:
             "high": profile.get("day_high"),
             "low": profile.get("day_low"),
             "exchange": profile.get("exchange") or metadata.get("exchange"),
+            "sector": metadata.get("sector"),
+            "industry": metadata.get("industry"),
+            "country": metadata.get("country"),
+            "benchmark_group": metadata.get("benchmark_group"),
+            "provider_symbol": metadata.get("provider_symbol"),
             "market_cap": profile.get("market_cap"),
             "pe_ratio": profile.get("pe_ratio"),
             "fifty_two_week_high": profile.get("fifty_two_week_high"),
@@ -637,14 +738,18 @@ class SupabaseForecastEngine:
         horizon_days: int,
         window_size: int = 60,
     ) -> dict[str, Any]:
+        forecast_start_date = _forecast_start_date()
         return self.build_ticker_forecast(
             ticker=ticker,
             horizon_days=horizon_days,
             window_size=window_size,
             prefer_snapshot=True,
+            forecast_start_date=forecast_start_date,
         )
 
     def _macro_payload(self) -> dict[str, Any]:
+        if self._macro_payload_cache is not None:
+            return self._macro_payload_cache
         row = self.repository.get_latest_macro_snapshot()
         if row is None:
             return {"date": "", "global_regime": 1, "macro": []}
@@ -656,7 +761,7 @@ class SupabaseForecastEngine:
             ("CPI All Items", "cpi_all_items"),
             ("Recession Indicator", "recession_indicator"),
         ]
-        return {
+        payload = {
             "date": row.get("date", ""),
             "global_regime": 1,
             "macro": [
@@ -665,6 +770,8 @@ class SupabaseForecastEngine:
                 if row.get(key) is not None
             ],
         }
+        self._macro_payload_cache = payload
+        return payload
 
     def run_market_forecast(
         self,
@@ -674,46 +781,47 @@ class SupabaseForecastEngine:
         top_n: int = 10,
         window_size: int = 60,
     ) -> dict[str, Any]:
-        forecasts = []
-        universe = self.repository.list_universe()
-        active_tickers = {row["ticker"] for row in universe}
-        snapshots = self.repository.list_latest_forecast_snapshots(
-            horizon_days=horizon_days,
-            window_size=window_size,
-        )
-        if snapshots:
-            for snapshot in snapshots:
-                if snapshot.get("ticker") not in active_tickers:
-                    continue
-                metadata = self.repository.ticker_metadata(snapshot["ticker"])
-                if metadata is None:
-                    continue
-                rows = self.repository.get_ohlcv_history(snapshot["ticker"])
-                if len(rows) < 30:
-                    continue
-                _, dates = self._prepare_price_series(rows)
-                if str(snapshot.get("as_of_date")) != dates[-1]:
-                    continue
-                forecasts.append(
-                    self._payload_from_snapshot(
-                        metadata=metadata,
-                        rows=rows,
-                        snapshot=snapshot,
-                    )
-                )
+        forecast_start_date = _forecast_start_date()
+        cache_key = (max(int(horizon_days), 1), max(int(window_size), 2), forecast_start_date)
+        forecasts = [forecast.copy() for forecast in self._market_forecast_cache.get(cache_key, [])]
         if not forecasts:
-            for row in universe:
-                try:
+            universe = self.repository.list_universe()
+            active_metadata = {row["ticker"]: row for row in universe}
+            snapshots = self.repository.list_latest_forecast_snapshots(
+                horizon_days=horizon_days,
+                window_size=window_size,
+            )
+            if snapshots:
+                latest_dates = self.repository.latest_ohlcv_dates_by_ticker()
+                for snapshot in snapshots:
+                    metadata = active_metadata.get(snapshot.get("ticker"))
+                    if metadata is None:
+                        continue
+                    latest_date = latest_dates.get(str(snapshot.get("ticker")))
+                    if latest_date and str(snapshot.get("as_of_date")) != latest_date:
+                        continue
                     forecasts.append(
-                        self.build_ticker_forecast(
-                            ticker=row["ticker"],
-                            horizon_days=horizon_days,
-                            window_size=window_size,
-                            prefer_snapshot=False,
+                        self._market_payload_from_snapshot(
+                            metadata=metadata,
+                            snapshot=snapshot,
+                            forecast_start_date=forecast_start_date,
                         )
                     )
-                except ArtifactValidationError:
-                    continue
+            if not forecasts:
+                for row in universe:
+                    try:
+                        forecasts.append(
+                            self.build_ticker_forecast(
+                                ticker=row["ticker"],
+                                horizon_days=horizon_days,
+                                window_size=window_size,
+                                prefer_snapshot=False,
+                                forecast_start_date=forecast_start_date,
+                            )
+                        )
+                    except ArtifactValidationError:
+                        continue
+            self._market_forecast_cache[cache_key] = [forecast.copy() for forecast in forecasts]
         if not forecasts:
             raise ArtifactValidationError("No Supabase tickers have enough market history")
         for forecast in forecasts:
@@ -769,12 +877,14 @@ class SupabaseForecastEngine:
     ) -> dict[str, Any]:
         risk_value = float(np.clip(risk, 0.0, 1.0))
         if selected_tickers:
+            forecast_start_date = _forecast_start_date()
             forecasts = [
                 self.build_ticker_forecast(
                     ticker=ticker,
                     horizon_days=horizon_days,
                     window_size=window_size,
                     prefer_snapshot=True,
+                    forecast_start_date=forecast_start_date,
                 )
                 for ticker in selected_tickers
             ]

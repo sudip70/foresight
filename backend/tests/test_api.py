@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -62,6 +64,10 @@ def test_ticker_forecast_endpoint_returns_ordered_scenarios(client):
     assert payload["target_prices"]["base"] < payload["target_prices"]["bull"]
     assert len(payload["historical_prices"]) > 1
     assert payload["forecast_paths"]["base"][0]["price"] == payload["latest_price"]
+    today = date.today().isoformat()
+    assert payload["forecast_start_date"] == today
+    assert payload["forecast_paths"]["base"][0]["date"] == today
+    assert payload["data_as_of"] == payload["latest_date"]
     assert len(payload["forecast_paths"]["base"]) == 46
     assert len({round(point["price"], 4) for point in payload["forecast_paths"]["base"]}) > 10
     assert payload["return_estimator"]["method"] == "multi_window_shrunk"
@@ -75,6 +81,9 @@ def test_local_profile_uses_artifact_and_config_fallbacks(client):
     assert payload["source"] == "local_artifacts"
     assert payload["display_name"] == "Apple"
     assert payload["fields"]["exchange"] == "NASDAQ"
+    assert payload["fields"]["sector"] == "Technology"
+    assert payload["fields"]["industry"] == "Consumer Electronics"
+    assert payload["fields"]["country"] == "US"
     assert payload["fields"]["fifty_two_week_high"] >= payload["fields"]["last_sale"]
     assert payload["fields"]["fifty_two_week_low"] <= payload["fields"]["last_sale"]
 

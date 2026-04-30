@@ -40,6 +40,8 @@ class MarketDataRepository(Protocol):
 
     def get_ohlcv_history(self, ticker: str) -> list[dict[str, Any]]: ...
 
+    def latest_ohlcv_dates_by_ticker(self) -> dict[str, str]: ...
+
     def get_latest_profile(self, ticker: str) -> dict[str, Any] | None: ...
 
     def get_latest_macro_snapshot(self) -> dict[str, Any] | None: ...
@@ -328,6 +330,20 @@ class SupabaseMarketDataRepository:
             },
         )
 
+    def latest_ohlcv_dates_by_ticker(self) -> dict[str, str]:
+        rows = self._get(
+            "market_ohlcv_daily",
+            {
+                "select": "ticker,date",
+                "order": "date.desc",
+                "limit": "5000",
+            },
+        )
+        latest: dict[str, str] = {}
+        for row in rows:
+            latest.setdefault(str(row["ticker"]), str(row["date"]))
+        return latest
+
     def get_latest_profile(self, ticker: str) -> dict[str, Any] | None:
         rows = self._get(
             "asset_profile_snapshots",
@@ -561,6 +577,16 @@ class InMemoryMarketDataRepository:
             if row.get("ticker") == normalized
         ]
         return sorted(rows, key=lambda row: row["date"])
+
+    def latest_ohlcv_dates_by_ticker(self) -> dict[str, str]:
+        latest: dict[str, str] = {}
+        for row in sorted(
+            self.tables["market_ohlcv_daily"],
+            key=lambda item: item["date"],
+            reverse=True,
+        ):
+            latest.setdefault(str(row["ticker"]), str(row["date"]))
+        return latest
 
     def get_latest_profile(self, ticker: str) -> dict[str, Any] | None:
         normalized = _normalize_ticker(ticker)
