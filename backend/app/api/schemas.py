@@ -100,6 +100,21 @@ class MarketIndexResponse(BaseModel):
     disclaimer: str
 
 
+class MarketIndexHistoryResponse(BaseModel):
+    source: str
+    symbol: str
+    label: str
+    display_name: str | None = None
+    provider_symbol: str
+    currency: str
+    range: str
+    lookback_days: int
+    as_of_date: str | None = None
+    history: list[dict[str, Any]]
+    summary: dict[str, Any]
+    disclaimer: str
+
+
 class PortfolioSimulationRequest(BaseModel):
     amount: float = Field(default=10000.0, gt=0)
     risk: float = Field(default=0.5, ge=0.0, le=1.0)

@@ -260,6 +260,52 @@ def test_backend_startup_refreshes_market_indices_without_supabase(tmp_path, mon
     reset_engine()
 
 
+def test_market_index_history_endpoint_returns_configured_history(client, monkeypatch):
+    def fake_history(settings, *, symbol, history_range):
+        assert symbol == "SP500"
+        assert history_range == "3m"
+        return {
+            "source": "fake",
+            "symbol": "SP500",
+            "label": "S&P 500",
+            "display_name": "S&P 500 Index",
+            "provider_symbol": "^GSPC",
+            "currency": "USD",
+            "range": "3m",
+            "lookback_days": 110,
+            "as_of_date": "2026-04-28",
+            "history": [
+                {"date": "2026-04-27", "close": 5000.0, "change": None, "change_percent": None},
+                {"date": "2026-04-28", "close": 5100.0, "change": 100.0, "change_percent": 0.02},
+            ],
+            "summary": {
+                "first_date": "2026-04-27",
+                "latest_date": "2026-04-28",
+                "first_close": 5000.0,
+                "latest_close": 5100.0,
+                "previous_close": 5000.0,
+                "change": 100.0,
+                "change_percent": 0.02,
+                "range_return": 0.02,
+                "high": 5100.0,
+                "low": 5000.0,
+                "points": 2,
+            },
+            "disclaimer": "fake",
+        }
+
+    monkeypatch.setattr(app_main, "fetch_market_index_history", fake_history)
+
+    response = client.get("/api/market/indices/SP500/history?range=3m")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "SP500"
+    assert payload["range"] == "3m"
+    assert payload["summary"]["latest_close"] == 5100.0
+    assert payload["history"][-1]["change_percent"] == 0.02
+
+
 def test_corrupted_artifacts_return_degraded_health_and_503(tmp_path, monkeypatch):
     artifact_root = build_fixture_artifact_tree(tmp_path)
     (artifact_root / "stock" / "prices.npy").unlink()

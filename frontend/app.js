@@ -7,12 +7,18 @@ const elements = {
   risk: document.querySelector("#risk"),
   riskValue: document.querySelector("#riskValue"),
   horizon: document.querySelector("#horizon"),
+  forecastHorizon: document.querySelector("#forecastHorizon"),
   windowSize: document.querySelector("#windowSize"),
   refreshDashboard: document.querySelector("#refreshDashboard"),
   learnModeToggle: document.querySelector("#learnModeToggle"),
   themeModeToggle: document.querySelector("#themeModeToggle"),
   marketAsOf: document.querySelector("#marketAsOf"),
   marketIndices: document.querySelector("#marketIndices"),
+  marketIndexSelect: document.querySelector("#marketIndexSelect"),
+  marketIndexDateRange: document.querySelector("#marketIndexDateRange"),
+  marketIndexSummary: document.querySelector("#marketIndexSummary"),
+  marketIndexChart: document.querySelector("#marketIndexChart"),
+  marketIndexChartFallback: document.querySelector("#marketIndexChartFallback"),
   marketHighlights: document.querySelector("#marketHighlights"),
   marketLessonCards: document.querySelector("#marketLessonCards"),
   macroSnapshot: document.querySelector("#macroSnapshot"),
@@ -75,6 +81,11 @@ const state = {
   backtest: null,
   chart: null,
   chartRange: "6m",
+  marketIndexChart: null,
+  marketIndexRange: "1y",
+  marketIndexSymbol: "SP500",
+  marketIndexAsOf: null,
+  marketIndexHistory: null,
   currentForecast: null,
   pendingForecastTicker: null,
   sentiment: null,
@@ -419,13 +430,14 @@ function insight(message, tone = "info") {
   return `<article class="insight ${tone}"><span>${message}</span></article>`;
 }
 
-function metricCard(label, value, tooltip, subtitle = "") {
+function metricCard(label, value, tooltip, subtitle = "", valueTone = "") {
   const tip = tooltip ? `<button class="why-btn" data-why="${label}: ${tooltip}" type="button">?</button>` : "";
   const detail = subtitle ? `<span class="metric-subtitle">${subtitle}</span>` : "";
+  const toneClass = valueTone ? ` ${valueTone}` : "";
   return `
     <article class="metric">
       <h3>${label} ${tip}</h3>
-      <strong class="animate-number">${value}</strong>
+      <strong class="animate-number${toneClass}">${value}</strong>
       ${detail}
       <div class="why-popover-slot"></div>
     </article>
@@ -470,13 +482,17 @@ function confidenceExplanation(confidence, label = "") {
   return `${label || "Low"} confidence means the scenario is more uncertain, so the educational focus should be risk and assumptions.`;
 }
 
+function iconSvg(name, className = "ui-icon") {
+  return `<svg class="${className}" aria-hidden="true"><use href="#icon-${name}"></use></svg>`;
+}
+
 function showToast(message, type = "info") {
   const container = document.getElementById("toastContainer");
   if (!container) return;
-  const icons = { info: "ℹ️", error: "❌", success: "✅" };
+  const icons = { info: "info-circle", error: "x-circle", success: "check-circle" };
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
-  toast.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span>${message}</span>`;
+  toast.innerHTML = `${iconSvg(icons[type] || icons.info, "toast-icon")}<span>${message}</span>`;
   container.appendChild(toast);
   setTimeout(() => { toast.style.opacity = "0"; toast.style.transition = "opacity 200ms"; setTimeout(() => toast.remove(), 250); }, 4000);
 }
@@ -508,6 +524,9 @@ function setThemeMode(mode) {
 
   if (state.currentForecast) {
     renderForecastChart(state.currentForecast);
+  }
+  if (state.marketIndexHistory) {
+    renderMarketIndexHistory(state.marketIndexHistory);
   }
 }
 
@@ -584,9 +603,28 @@ function isAbort(error) {
   return error && error.name === "AbortError";
 }
 
+function selectedHorizonDays() {
+  const parsed = Number(elements.forecastHorizon?.value || elements.horizon.value || 300);
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.round(parsed) : 300;
+}
+
+function syncHorizonControls(value) {
+  const nextValue = String(value || "");
+  if (elements.horizon.value !== nextValue) {
+    elements.horizon.value = nextValue;
+  }
+  if (elements.forecastHorizon && elements.forecastHorizon.value !== nextValue) {
+    elements.forecastHorizon.value = nextValue;
+  }
+  state.loaded.market = false;
+  state.loaded.forecast = false;
+  state.loaded.simulator = false;
+  renderPortfolioLearning();
+}
+
 function dashboardPayload(extra = {}) {
   return {
-    horizon_days: Number(elements.horizon.value),
+    horizon_days: selectedHorizonDays(),
     risk: Number(elements.risk.value),
     window_size: Number(elements.windowSize.value),
     strict_validation: true,
@@ -598,7 +636,7 @@ function allocationPayload() {
   return {
     amount: Number(elements.amount.value),
     risk: Number(elements.risk.value),
-    duration: Number(elements.horizon.value),
+    duration: selectedHorizonDays(),
     window_size: Number(elements.windowSize.value),
     strict_validation: true,
   };
@@ -610,13 +648,19 @@ function renderUniverse(universe) {
     (left, right) =>
       (assetClassOrder[left.asset_class] ?? 99) - (assetClassOrder[right.asset_class] ?? 99),
   );
+  const sortedGroups = orderedGroups.map((group) => ({
+    ...group,
+    tickers: [...(group.tickers || [])].sort((left, right) =>
+      String(left.ticker || "").localeCompare(String(right.ticker || "")),
+    ),
+  }));
   const buildOptions = () =>
-    orderedGroups
+    sortedGroups
       .map(
         (group) => `
-          <optgroup label="${group.asset_class}">
+          <optgroup label="${escapeHtml(group.asset_class)}">
             ${group.tickers
-              .map((entry) => `<option value="${entry.ticker}">${entry.ticker}</option>`)
+              .map((entry) => `<option value="${escapeHtml(entry.ticker)}">${escapeHtml(entry.ticker)}</option>`)
               .join("")}
           </optgroup>
         `,
@@ -625,7 +669,7 @@ function renderUniverse(universe) {
 
   elements.tickerSelect.innerHTML = buildOptions();
   elements.simulationTickers.innerHTML = buildOptions();
-  const firstTicker = orderedGroups.find((group) => group.tickers.length > 0)?.tickers[0];
+  const firstTicker = sortedGroups.find((group) => group.tickers.length > 0)?.tickers[0];
   if (firstTicker) {
     elements.tickerSelect.value = firstTicker.ticker;
   }
@@ -673,8 +717,13 @@ function renderMarketIndices(result) {
   const indices = result?.indices || [];
   if (!indices.length) {
     setError(elements.marketIndices, "Market index data unavailable.");
+    renderMarketIndexOptions([]);
     return;
   }
+  const indexDates = indices.map((entry) => entry.as_of_date).filter(Boolean);
+  state.marketIndexAsOf = result.as_of_date || (indexDates.length ? indexDates.sort().at(-1) : null);
+  renderProjectStory();
+  renderMarketIndexOptions(indices);
   elements.marketIndices.innerHTML = indices
     .map((entry) => {
       const change = Number(entry.change || 0);
@@ -695,6 +744,151 @@ function renderMarketIndices(result) {
       `;
     })
     .join("");
+}
+
+function renderMarketIndexOptions(indices) {
+  if (!elements.marketIndexSelect) return;
+  const available = indices.filter((entry) => entry?.symbol);
+  if (!available.length) {
+    elements.marketIndexSelect.innerHTML = "";
+    return;
+  }
+  const selected = available.some((entry) => entry.symbol === state.marketIndexSymbol)
+    ? state.marketIndexSymbol
+    : available[0].symbol;
+  state.marketIndexSymbol = selected;
+  elements.marketIndexSelect.innerHTML = available
+    .map(
+      (entry) =>
+        `<option value="${escapeHtml(entry.symbol)}">${escapeHtml(entry.label || entry.symbol)}</option>`,
+    )
+    .join("");
+  elements.marketIndexSelect.value = selected;
+}
+
+function movingAverage(points, windowSize) {
+  let total = 0;
+  return points.map((point, index) => {
+    const value = Number(point.close || 0);
+    total += value;
+    if (index >= windowSize) {
+      total -= Number(points[index - windowSize].close || 0);
+    }
+    return index < windowSize - 1 ? null : total / windowSize;
+  });
+}
+
+function renderMarketIndexHistory(result) {
+  const history = result?.history || [];
+  if (!history.length) {
+    setError(elements.marketIndexSummary, "Market index history unavailable.");
+    if (elements.marketIndexChartFallback) {
+      elements.marketIndexChartFallback.textContent = "No history returned for this index.";
+    }
+    return;
+  }
+  state.marketIndexHistory = result;
+  state.marketIndexSymbol = result.symbol || state.marketIndexSymbol;
+  if (elements.marketIndexSelect) {
+    const hasSelectedOption = Array.from(elements.marketIndexSelect.options).some(
+      (option) => option.value === state.marketIndexSymbol,
+    );
+    if (!hasSelectedOption) {
+      elements.marketIndexSelect.innerHTML =
+        `<option value="${escapeHtml(state.marketIndexSymbol)}">${escapeHtml(result.label || state.marketIndexSymbol)}</option>`;
+    }
+    elements.marketIndexSelect.value = state.marketIndexSymbol;
+  }
+
+  const summary = result.summary || {};
+  const firstDate = summary.first_date || history[0]?.date;
+  const latestDate = summary.latest_date || result.as_of_date || history.at(-1)?.date;
+  if (elements.marketIndexDateRange) {
+    elements.marketIndexDateRange.textContent = `${result.label || result.symbol} - ${formatDate(firstDate)} to ${formatDate(latestDate)}`;
+  }
+  elements.marketIndexSummary.innerHTML = [
+    metricCard("Latest", formatIndexValue(summary.latest_close || history.at(-1)?.close)),
+    metricCard(
+      "Range return",
+      formatSignedPercent(summary.range_return),
+      "Total return over the selected chart range",
+      "",
+      isMissing(summary.range_return) ? "" : toneForValue(summary.range_return),
+    ),
+    metricCard(
+      "Daily move",
+      `${formatSignedNumber(summary.change)} (${formatSignedPercent(summary.change_percent)})`,
+      "",
+      "",
+      isMissing(summary.change) ? "" : toneForValue(summary.change),
+    ),
+    metricCard("High / low", `${formatIndexValue(summary.high)} / ${formatIndexValue(summary.low)}`),
+  ].join("");
+
+  if (!window.Chart) {
+    elements.marketIndexChartFallback.textContent = "Chart.js is unavailable. Index history is still summarized.";
+    return;
+  }
+  elements.marketIndexChartFallback.textContent = "";
+  if (state.marketIndexChart) {
+    state.marketIndexChart.destroy();
+  }
+
+  const chartAccent = cssVar("--accent", "#008755");
+  const chartBlue = cssVar("--blue", "#1f66d1");
+  const chartGrid = cssVar("--chart-grid", "#edf2f7");
+  const chartText = cssVar("--muted", "#52617a");
+  state.marketIndexChart = new window.Chart(elements.marketIndexChart, {
+    type: "line",
+    data: {
+      labels: history.map((point) => formatDate(point.date)),
+      datasets: [
+        {
+          label: "Close",
+          data: history.map((point) => point.close),
+          borderColor: chartAccent,
+          backgroundColor: "transparent",
+          pointRadius: 0,
+          borderWidth: 3,
+        },
+        {
+          label: "20-day average",
+          data: movingAverage(history, 20),
+          borderColor: chartBlue,
+          borderDash: [6, 4],
+          backgroundColor: "transparent",
+          pointRadius: 0,
+          borderWidth: 2,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { intersect: false, mode: "index" },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (context) => `${context.dataset.label}: ${formatIndexValue(context.parsed.y)}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { color: chartGrid },
+          ticks: { color: chartText, maxTicksLimit: 8 },
+        },
+        y: {
+          grid: { color: chartGrid },
+          ticks: {
+            color: chartText,
+            callback: (value) => formatIndexValue(value),
+          },
+        },
+      },
+    },
+  });
 }
 
 function renderMarketSentiment(result) {
@@ -816,7 +1010,8 @@ function renderMarket(result) {
   renderMarketInsights(result);
   renderMarketLearning(result);
   if (elements.marketAsOf) {
-    const dateText = result.macro_snapshot?.date || state.universe?.latest_date || "";
+    const dateText =
+      state.marketIndexAsOf || result.macro_snapshot?.date || state.universe?.latest_date || "";
     elements.marketAsOf.textContent = `Live index performance and ranked opportunity scan${dateText ? ` - as of ${formatDate(dateText)}` : ""}.`;
   }
   if (elements.footerDataAsOf && (result.macro_snapshot?.date || state.universe?.latest_date)) {
@@ -1304,7 +1499,7 @@ function renderClassAllocation(allocations) {
 function renderPortfolioLearning(result = state.simulation) {
   if (!elements.portfolioClassroom) return;
   const risk = Number(elements.risk.value || 0);
-  const horizon = Number(elements.horizon.value || 0);
+  const horizon = selectedHorizonDays();
   const amount = Number(elements.amount.value || 0);
   const riskLabel = riskPreferenceLabel(risk);
   const classRows = result?.class_allocations || [];
@@ -1420,13 +1615,35 @@ function renderBacktest(result) {
   );
 }
 
+function latestDataDate(refresh = state.refreshStatus || {}) {
+  const latestRun = refresh.latest_run || {};
+  return (
+    state.marketIndexAsOf ||
+    refresh.market_index_refresh?.as_of_date ||
+    refresh.latest_market_date ||
+    state.universe?.latest_date ||
+    latestRun.completed_at
+  );
+}
+
+function latestDataSubtitle(refresh = state.refreshStatus || {}) {
+  const latestRun = refresh.latest_run || {};
+  if (state.marketIndexAsOf || refresh.market_index_refresh?.as_of_date) {
+    return "Live market index refresh";
+  }
+  if (latestRun.mode) {
+    return `${latestRun.mode} refresh`;
+  }
+  return "Latest available market date";
+}
+
 function renderDataHealthCards() {
   if (!elements.dataHealthCards) return;
   const health = state.health || {};
   const models = state.models || {};
   const refresh = state.refreshStatus || {};
   const latestRun = refresh.latest_run || {};
-  const latestMarketDate = refresh.latest_market_date || state.universe?.latest_date || latestRun.completed_at;
+  const latestMarketDate = latestDataDate(refresh);
   const assetCount = refresh.asset_count ?? state.universe?.tickers?.length;
   const confidence = state.simulation?.summary?.average_confidence;
   const backtestMetrics = state.backtest?.summary_metrics || {};
@@ -1434,11 +1651,8 @@ function renderDataHealthCards() {
   const backtestSubtitle = isMissing(sharpeRatio)
     ? "Sharpe ratio pending"
     : `${formatNumber(sharpeRatio, 2)} Sharpe ratio`;
-  const latestSubtitle = latestRun.mode
-    ? `${latestRun.mode} refresh`
-    : refresh.market_index_refresh?.as_of_date
-      ? `Index refresh ${formatDate(refresh.market_index_refresh.as_of_date)}`
-      : "Latest available market date";
+  const latestSubtitle = latestDataSubtitle(refresh);
+  const hasLiveIndexDate = Boolean(state.marketIndexAsOf || refresh.market_index_refresh?.as_of_date);
 
   elements.dataHealthCards.innerHTML = [
     `<article class="health-card">
@@ -1448,7 +1662,7 @@ function renderDataHealthCards() {
     </article>`,
     `<article class="health-card">
       <span>Data freshness</span>
-      <strong>${latestRun.completed_at ? formatDateTime(latestRun.completed_at) : formatDate(latestMarketDate)}</strong>
+      <strong>${latestRun.completed_at && !hasLiveIndexDate ? formatDateTime(latestRun.completed_at) : formatDate(latestMarketDate)}</strong>
       <small>${latestSubtitle}</small>
     </article>`,
     `<article class="health-card">
@@ -1470,8 +1684,8 @@ function renderProjectStory() {
   const health = state.health || {};
   const models = state.models || {};
   const refresh = state.refreshStatus || {};
-  const latestRun = refresh.latest_run || {};
-  const latestMarketDate = refresh.latest_market_date || state.universe?.latest_date || latestRun.completed_at;
+  const latestMarketDate = latestDataDate(refresh);
+  const latestSubtitle = latestDataSubtitle(refresh);
   const assetCount = refresh.asset_count ?? state.universe?.tickers?.length;
   const featureGroups = models.feature_groups ? Object.keys(models.feature_groups).length : 0;
   const explainability = models.explainability?.method || "surrogate explainability";
@@ -1484,7 +1698,8 @@ function renderProjectStory() {
 
   elements.projectStats.innerHTML = [
     `<article><span>Tracked universe</span><strong>${formatInteger(assetCount)}</strong><small>${classCoverageLabel(state.universe)}</small></article>`,
-    `<article><span>Latest data</span><strong>${formatDate(latestMarketDate)}</strong><small>${latestRun.mode || "artifact or market refresh"}</small></article>`,
+    `<article><span>Latest data</span><strong>${formatDate(latestMarketDate)}</strong><small>${latestSubtitle}</small></article>`,
+    `<article><span>Index history</span><strong>1M-5Y</strong><small>S&P 500, Nasdaq, TSX, and Dow charts</small></article>`,
     `<article><span>Backend status</span><strong class="${statusClass}">${statusLabel}</strong><small>FastAPI inference service</small></article>`,
   ].join("");
 
@@ -1492,11 +1707,15 @@ function renderProjectStory() {
     elements.projectHighlights.innerHTML = [
       lessonCard(
         "Full-stack product thinking",
-        "The project connects a beginner-friendly interface to real backend APIs, model artifacts, refresh jobs, and portfolio simulation logic.",
+        "The project connects a beginner-friendly interface to real backend APIs, model artifacts, market index history, refresh jobs, and portfolio simulation logic.",
       ),
       lessonCard(
         "ML system design",
         `The backend exposes model metadata, ${formatInteger(featureGroups)} feature groups, forecasts, simulations, backtests, and ${explainability}.`,
+      ),
+      lessonCard(
+        "Market data UX",
+        "The market overview now combines live index cards with selectable historical charts and moving-average context before showing model-ranked opportunities.",
       ),
       lessonCard(
         "Education-first UX",
@@ -1509,8 +1728,12 @@ function renderProjectStory() {
     elements.projectTransparency.innerHTML = [
       lessonCard(
         "Data freshness",
-        `The app reports the latest market date (${formatDate(latestMarketDate)}) so users know what data the model used.`,
+        `The app reports the latest live market/index date (${formatDate(latestMarketDate)}) so users know what data the page used.`,
         termChip("freshness"),
+      ),
+      lessonCard(
+        "Historical index source",
+        "Index charts are fetched through a FastAPI route backed by the configured market data provider and limited to the configured market index symbols.",
       ),
       lessonCard(
         "Model limitations",
@@ -1569,14 +1792,49 @@ async function ensureUniverse() {
   }
 }
 
+async function loadMarketIndexHistory() {
+  const symbol = state.marketIndexSymbol || "SP500";
+  const range = state.marketIndexRange || "1y";
+  if (elements.marketIndexSummary) {
+    setLoading(elements.marketIndexSummary);
+  }
+  if (elements.marketIndexChartFallback) {
+    elements.marketIndexChartFallback.textContent = "Loading index history...";
+  }
+  try {
+    const result = await callSectionApi(
+      "marketIndexHistory",
+      `/api/market/indices/${encodeURIComponent(symbol)}/history?range=${encodeURIComponent(range)}`,
+    );
+    renderMarketIndexHistory(result);
+    return result;
+  } catch (error) {
+    if (isAbort(error)) return null;
+    setError(elements.marketIndexSummary, `Market index history unavailable: ${error.message}`);
+    if (elements.marketIndexChartFallback) {
+      elements.marketIndexChartFallback.textContent = "";
+    }
+    if (state.marketIndexChart) {
+      state.marketIndexChart.destroy();
+      state.marketIndexChart = null;
+    }
+    throw error;
+  }
+}
+
 async function runMarketForecast() {
   setLoading(elements.marketTable);
   setLoading(elements.marketHighlights);
   setLoading(elements.marketIndices);
+  setLoading(elements.marketIndexSummary);
+  if (elements.marketIndexChartFallback) {
+    elements.marketIndexChartFallback.textContent = "Loading index history...";
+  }
   setLoading(elements.marketInsightList);
   setLoading(elements.topOpportunities);
   setLoading(elements.sentimentReasons);
   setLoading(elements.marketLessonCards);
+  let indexLoaded = false;
   try {
     const [indexResult, marketResult] = await Promise.allSettled([
       callSectionApi("marketIndices", "/api/market/indices"),
@@ -1587,8 +1845,16 @@ async function runMarketForecast() {
     ]);
     if (indexResult.status === "fulfilled") {
       renderMarketIndices(indexResult.value);
+      indexLoaded = true;
+      loadMarketIndexHistory().catch((error) => {
+        if (!isAbort(error)) showToast(error.message, "error");
+      });
     } else {
       setError(elements.marketIndices, `Market index data unavailable: ${indexResult.reason.message}`);
+      setError(elements.marketIndexSummary, "Market index history unavailable.");
+      if (elements.marketIndexChartFallback) {
+        elements.marketIndexChartFallback.textContent = "";
+      }
     }
     if (marketResult.status === "rejected") {
       throw marketResult.reason;
@@ -1598,7 +1864,13 @@ async function runMarketForecast() {
     if (isAbort(error)) return;
     setError(elements.marketTable, `Market forecast unavailable: ${error.message}`);
     setError(elements.marketHighlights, "Market highlights unavailable.");
-    setError(elements.marketIndices, "Market index data unavailable.");
+    if (!indexLoaded) {
+      setError(elements.marketIndices, "Market index data unavailable.");
+      setError(elements.marketIndexSummary, "Market index history unavailable.");
+      if (elements.marketIndexChartFallback) {
+        elements.marketIndexChartFallback.textContent = "";
+      }
+    }
     setError(elements.marketInsightList, "Market insights unavailable.");
     setError(elements.topOpportunities, "Top opportunities unavailable.");
     setError(elements.marketLessonCards, "Market lesson unavailable.");
@@ -1721,6 +1993,8 @@ function resetLoadedViews() {
     diagnostics: false,
   };
   state.backtest = null;
+  state.marketIndexAsOf = null;
+  state.marketIndexHistory = null;
 }
 
 async function refreshDiagnosticsInBackground() {
@@ -1782,6 +2056,10 @@ async function probeBackend() {
     elements.apiStatus.className = "status-bad";
     setError(elements.marketTable, "Backend is not connected.");
     setError(elements.marketIndices, "Backend is not connected.");
+    setError(elements.marketIndexSummary, "Backend is not connected.");
+    if (elements.marketIndexChartFallback) {
+      elements.marketIndexChartFallback.textContent = "";
+    }
     setError(elements.tickerMetrics, "Backend is not connected.");
     setError(elements.simulationSummary, "Backend is not connected.");
     const emptyState = document.getElementById("marketEmptyState");
@@ -1801,6 +2079,9 @@ function switchTab(tabName) {
   window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   if (tabName === "forecast" && state.chart) {
     requestAnimationFrame(() => state.chart.resize());
+  }
+  if (tabName === "market" && state.marketIndexChart) {
+    requestAnimationFrame(() => state.marketIndexChart.resize());
   }
   refreshActiveView().catch((error) => {
     if (!isAbort(error)) showToast(error.message, "error");
@@ -1839,13 +2120,36 @@ document.addEventListener("click", (event) => {
 });
 
 document.querySelectorAll(".range-button").forEach((button) => {
+  if (button.dataset.indexRange) return;
   button.addEventListener("click", () => {
-    document.querySelectorAll(".range-button").forEach((node) => node.classList.remove("is-active"));
+    document
+      .querySelectorAll(".range-button:not([data-index-range])")
+      .forEach((node) => node.classList.remove("is-active"));
     button.classList.add("is-active");
     state.chartRange = button.dataset.range;
     if (state.currentForecast) {
       renderForecastChart(state.currentForecast);
     }
+  });
+});
+
+document.querySelectorAll("[data-index-range]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document
+      .querySelectorAll("[data-index-range]")
+      .forEach((node) => node.classList.remove("is-active"));
+    button.classList.add("is-active");
+    state.marketIndexRange = button.dataset.indexRange;
+    loadMarketIndexHistory().catch((error) => {
+      if (!isAbort(error)) showToast(error.message, "error");
+    });
+  });
+});
+
+elements.marketIndexSelect?.addEventListener("change", () => {
+  state.marketIndexSymbol = elements.marketIndexSelect.value || state.marketIndexSymbol;
+  loadMarketIndexHistory().catch((error) => {
+    if (!isAbort(error)) showToast(error.message, "error");
   });
 });
 
@@ -1884,10 +2188,10 @@ elements.risk.addEventListener("input", () => {
 });
 
 elements.horizon.addEventListener("input", () => {
-  state.loaded.market = false;
-  state.loaded.forecast = false;
-  state.loaded.simulator = false;
-  renderPortfolioLearning();
+  syncHorizonControls(elements.horizon.value);
+});
+elements.forecastHorizon?.addEventListener("input", () => {
+  syncHorizonControls(elements.forecastHorizon.value);
 });
 elements.amount.addEventListener("input", () => {
   state.loaded.simulator = false;
@@ -1949,6 +2253,7 @@ elements.runBacktest.addEventListener("click", () =>
 
 elements.apiBase.value = state.apiBase;
 elements.riskValue.textContent = Number(elements.risk.value).toFixed(2);
+syncHorizonControls(elements.horizon.value);
 setLearnMode(state.learnMode);
 setThemeMode(state.themeMode);
 renderPortfolioLearning();
@@ -2023,10 +2328,10 @@ function renderCmdResults(query) {
   const q = query.toLowerCase().trim();
   const results = [];
   const tabs = [
-    { label: "Market overview", tab: "market", icon: "📊" },
-    { label: "Ticker forecast", tab: "forecast", icon: "📈" },
-    { label: "Portfolio simulator", tab: "simulator", icon: "🧪" },
-    { label: "Project story", tab: "project", icon: "📖" },
+    { label: "Market overview", tab: "market", icon: "market" },
+    { label: "Ticker forecast", tab: "forecast", icon: "forecast" },
+    { label: "Portfolio simulator", tab: "simulator", icon: "simulator" },
+    { label: "Project story", tab: "project", icon: "project" },
   ];
   tabs.forEach((t) => {
     if (!q || t.label.toLowerCase().includes(q)) {
@@ -2035,19 +2340,19 @@ function renderCmdResults(query) {
   });
   Object.entries(glossary).forEach(([key, term]) => {
     if (!q || term.title.toLowerCase().includes(q) || term.definition.toLowerCase().includes(q)) {
-      results.push({ label: term.title, icon: "📘", type: "Glossary", key });
+      results.push({ label: term.title, icon: "project", type: "Glossary", key });
     }
   });
   if (state.universe) {
     state.universe.tickers.forEach((entry) => {
       if (!q || entry.ticker.toLowerCase().includes(q)) {
-        results.push({ label: entry.ticker, icon: "📈", type: "Ticker", ticker: entry.ticker });
+        results.push({ label: entry.ticker, icon: "forecast", type: "Ticker", ticker: entry.ticker });
       }
     });
   }
   cmdResults.innerHTML = results.slice(0, 12).map((r) => `
     <div class="cmd-result-item" data-cmd-type="${r.type}" data-cmd-value="${r.tab || r.key || r.ticker || ""}">
-      <span>${r.icon}</span>
+      ${iconSvg(r.icon, "cmd-result-icon")}
       <span>${r.label}</span>
       <span class="cmd-result-type">${r.type}</span>
     </div>

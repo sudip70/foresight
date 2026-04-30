@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 import json
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.schemas import (
@@ -17,6 +17,7 @@ from backend.app.api.schemas import (
     InferenceResponse,
     MarketForecastRequest,
     MarketForecastResponse,
+    MarketIndexHistoryResponse,
     MarketIndexResponse,
     ModelsResponse,
     PortfolioSimulationRequest,
@@ -29,7 +30,10 @@ from backend.app.api.schemas import (
 )
 from backend.app.core.config import REPO_ROOT, get_settings
 from backend.app.market.forecasting import SupabaseForecastEngine
-from backend.app.market.index_refresh import refresh_market_index_snapshots
+from backend.app.market.index_refresh import (
+    fetch_market_index_history,
+    refresh_market_index_snapshots,
+)
 from backend.app.market.repository import (
     MarketDataUnavailable,
     build_market_repository,
@@ -380,6 +384,36 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Exception as exc:  # pragma: no cover - defensive
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get(
+        f"{settings.api_prefix}/market/indices/{{symbol}}/history",
+        response_model=MarketIndexHistoryResponse,
+    )
+    def market_index_history(
+        symbol: str,
+        history_range: str = Query(
+            default="1y",
+            alias="range",
+            pattern="^(1m|3m|6m|1y|5y)$",
+        ),
+    ):
+        try:
+            return fetch_market_index_history(
+                settings,
+                symbol=symbol,
+                history_range=history_range,
+            )
+        except ValueError as exc:
+            message = str(exc)
+            if "Unsupported market index symbol" in message:
+                raise HTTPException(status_code=404, detail=message) from exc
+            if (
+                "No index history" in message
+                or "No usable index history" in message
+                or "No close-price history" in message
+            ):
+                raise HTTPException(status_code=503, detail=message) from exc
+            raise HTTPException(status_code=400, detail=message) from exc
 
     @app.post(
         f"{settings.api_prefix}/portfolio/simulations",
