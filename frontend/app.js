@@ -1,3 +1,49 @@
+const DEPLOYED_API_BASE = "https://stockify-backend-adc6.onrender.com";
+const LOCAL_API_BASE = "http://localhost:8000";
+
+function normalizeApiBase(value) {
+  return String(value || "").trim().replace(/\/$/, "");
+}
+
+function queryApiBase() {
+  try {
+    return new URLSearchParams(window.location.search).get("apiBase");
+  } catch {
+    return "";
+  }
+}
+
+function isLocalHost(host) {
+  return !host || host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+}
+
+function isLocalApiBase(value) {
+  try {
+    return isLocalHost(new URL(value).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function defaultApiBase() {
+  const host = window.location?.hostname || "";
+  return isLocalHost(host) ? LOCAL_API_BASE : DEPLOYED_API_BASE;
+}
+
+function initialApiBase() {
+  const explicitApiBase = queryApiBase() || window.FORESIGHT_API_BASE;
+  if (explicitApiBase) return normalizeApiBase(explicitApiBase);
+
+  const savedApiBase = normalizeApiBase(
+    localStorage.getItem("foresight-api-base") || localStorage.getItem("stockify-api-base"),
+  );
+  const host = window.location?.hostname || "";
+  if (savedApiBase && (isLocalHost(host) || !isLocalApiBase(savedApiBase))) {
+    return savedApiBase;
+  }
+  return defaultApiBase();
+}
+
 const elements = {
   apiBase: document.querySelector("#apiBase"),
   apiStatus: document.querySelector("#apiStatus"),
@@ -69,10 +115,7 @@ const elements = {
 };
 
 const state = {
-  apiBase:
-    localStorage.getItem("foresight-api-base") ||
-    localStorage.getItem("stockify-api-base") ||
-    "http://localhost:8000",
+  apiBase: initialApiBase(),
   universe: null,
   health: null,
   models: null,
@@ -2216,7 +2259,8 @@ elements.themeModeToggle?.addEventListener("click", (e) => {
 });
 
 elements.saveApiBase.addEventListener("click", async () => {
-  state.apiBase = elements.apiBase.value.replace(/\/$/, "");
+  state.apiBase = normalizeApiBase(elements.apiBase.value) || defaultApiBase();
+  elements.apiBase.value = state.apiBase;
   localStorage.setItem("foresight-api-base", state.apiBase);
   state.universe = null;
   resetLoadedViews();
