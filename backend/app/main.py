@@ -32,7 +32,9 @@ from backend.app.core.config import REPO_ROOT, get_settings
 from backend.app.market.forecasting import SupabaseForecastEngine
 from backend.app.market.index_refresh import (
     fetch_market_index_history,
+    fetch_market_index_history_from_repository,
     fetch_market_index_snapshots,
+    fetch_market_index_snapshots_from_repository,
     refresh_market_index_snapshots,
 )
 from backend.app.market.repository import (
@@ -144,6 +146,26 @@ def _market_index_live_payload(app: FastAPI) -> dict:
     app.state.market_index_rows = refresh_result.get("rows", []) or []
     app.state.market_index_refresh_error = None
     return _market_index_cache_payload(app)
+
+
+def _market_index_repository_proxy_payload(app: FastAPI) -> dict:
+    repository = getattr(app.state, "market_repository", None)
+    if repository is None:
+        raise MarketDataUnavailable("Supabase market data is not available")
+    refresh_result = fetch_market_index_snapshots_from_repository(
+        get_settings(),
+        repository=repository,
+    )
+    app.state.market_index_refresh_result = refresh_result
+    app.state.market_index_rows = refresh_result.get("rows", []) or []
+    app.state.market_index_refresh_error = None
+    payload = _market_index_cache_payload(app)
+    payload["source"] = "supabase_proxy"
+    payload["disclaimer"] = (
+        "Index cards use Supabase ETF proxy history when direct index snapshots "
+        "or live provider data are unavailable."
+    )
+    return payload
 
 
 def _local_refresh_status_payload(app: FastAPI) -> dict:
@@ -438,7 +460,7 @@ def create_app() -> FastAPI:
                 return _market_index_live_payload(app)
             except Exception as exc:  # pragma: no cover - provider/network defensive path
                 app.state.market_index_refresh_error = exc
-                return _market_index_cache_payload(app)
+                return _market_index_repository_proxy_payload(app)
         try:
             payload = forecast_engine.market_indices_payload()
             if payload.get("indices"):
@@ -450,7 +472,7 @@ def create_app() -> FastAPI:
                 return _market_index_live_payload(app)
             except Exception as exc:  # pragma: no cover - provider/network defensive path
                 app.state.market_index_refresh_error = exc
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
+                return _market_index_repository_proxy_payload(app)
         except MarketDataUnavailable as exc:
             cache_payload = _market_index_cache_payload(app)
             if cache_payload["indices"]:
@@ -458,7 +480,10 @@ def create_app() -> FastAPI:
             try:
                 return _market_index_live_payload(app)
             except Exception:
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
+                try:
+                    return _market_index_repository_proxy_payload(app)
+                except Exception:
+                    raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Exception as exc:  # pragma: no cover - defensive
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -481,6 +506,17 @@ def create_app() -> FastAPI:
                 history_range=history_range,
             )
         except ValueError as exc:
+            repository = getattr(app.state, "market_repository", None)
+            if repository is not None:
+                try:
+                    return fetch_market_index_history_from_repository(
+                        settings,
+                        repository=repository,
+                        symbol=symbol,
+                        history_range=history_range,
+                    )
+                except ValueError:
+                    pass
             message = str(exc)
             if "Unsupported market index symbol" in message:
                 raise HTTPException(status_code=404, detail=message) from exc
