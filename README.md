@@ -65,7 +65,7 @@ The frontend expects the backend base URL to be configurable from the page so it
 
 The repository includes `.github/workflows/gh-pages.yml`, which deploys only the static files in `frontend/`. In GitHub, set **Settings → Pages → Build and deployment → Source** to **GitHub Actions** so that workflow is used.
 
-When the app is served from GitHub Pages or another non-local hostname, the frontend defaults to the current Render backend at `https://stockify-backend-adc6.onrender.com`. Local development still defaults to `http://localhost:8000`. Keep this URL until Render confirms the renamed Foresight service URL, then update `DEPLOYED_API_BASE` and this section. You can override the backend from the in-app Settings panel or by opening the page with `?apiBase=https://your-backend.example.com`.
+When the app is served from GitHub Pages or another non-local hostname, the frontend defaults to the Foresight Render backend at `https://foresight-backend-a5qx.onrender.com`. Local development still defaults to `http://localhost:8000`. You can override the backend from the in-app Settings panel or by opening the page with `?apiBase=https://your-backend.example.com`.
 
 If Pages is accidentally configured to deploy from the `main` branch root, the root `index.html` redirects visitors to `frontend/`, but the GitHub Actions deployment is the preferred setup.
 
