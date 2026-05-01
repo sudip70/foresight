@@ -9,32 +9,32 @@
   ],
   "class_ranges": {
     "cash": [
-      30,
-      31
+      55,
+      56
     ],
     "crypto": [
-      10,
-      20
+      25,
+      35
     ],
     "etf": [
-      20,
-      30
+      35,
+      55
     ],
     "stock": [
       0,
-      10
+      25
     ]
   },
   "eval_date_range": {
-    "end": "2026-04-22",
-    "start": "2024-12-04"
+    "end": "2026-04-28",
+    "start": "2024-12-09"
   },
-  "eval_mean_agent_alpha": 0.000330499785246888,
-  "eval_mean_final_value": 1.0528499171718644,
-  "eval_mean_max_drawdown": 0.11451724973770427,
-  "eval_mean_reward": -205.74494586266408,
-  "eval_mean_sharpe": 0.7876134383156098,
-  "eval_rows": 345,
+  "eval_mean_agent_alpha": 0.0005075385299878507,
+  "eval_mean_final_value": 1.23856441512143,
+  "eval_mean_max_drawdown": 0.08790461174695863,
+  "eval_mean_reward": -121.4772323535902,
+  "eval_mean_sharpe": 1.9485458457388456,
+  "eval_rows": 346,
   "feature_version": "sac-meta-v3-globalmacro-cashaware",
   "guardrails": {
     "cash_annual_return": 0.04,
@@ -48,7 +48,7 @@
     "max_stock_weight": 0.75,
     "min_expected_daily_return": 0.0
   },
-  "inference_observation_dim": 447,
+  "inference_observation_dim": 797,
   "meta_architecture": {
     "class_feature_layout": [
       "class_expected_return",
@@ -78,8 +78,8 @@
     "cash"
   ],
   "policy_backend": "sb3",
-  "policy_observation_dim": 447,
-  "sac_retrained_at": "2026-04-24T21:29:38.391462+00:00",
+  "policy_observation_dim": 797,
+  "sac_retrained_at": "2026-05-01T01:12:26.510324+00:00",
   "sac_training_config": {
     "activation_fn": "relu",
     "batch_size": 256,
@@ -133,9 +133,9 @@
     "window_size": 60
   },
   "train_date_range": {
-    "end": "2025-03-04",
+    "end": "2025-03-07",
     "start": "2020-08-20"
   },
-  "train_rows": 1139,
+  "train_rows": 1142,
   "uses_shared_macro": true
 }

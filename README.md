@@ -2,7 +2,7 @@
 
 Foresight is a split web application for ticker intelligence, scenario forecasting, portfolio simulation, and model explainability.
 
-The live inference stack now uses a horizon-based hybrid allocator: learned PPO/SAC artifacts are still loaded, weak policies are blended with deterministic signal experts, and a final sleeve allocator balances projected horizon return against diversification, concentration, class caps, and risk-based cash limits.
+The Render deployment is Supabase-first: market overview, ticker profiles, forecasts, and portfolio simulations read from Supabase and do not silently fall back to bundled artifacts. Local development can still enable the experimental PPO/SAC artifact engine for RL diagnostics, backtests, and explainability.
 
 Phase 1 replaces the legacy Streamlit prototype with:
 
@@ -123,9 +123,13 @@ The job is idempotent: it upserts `asset_universe`, `market_ohlcv_daily`, `asset
 
 The FastAPI app prefers Supabase-backed market data when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present. If they are absent, it falls back to the current artifact-backed dashboard.
 
+For the Render deployment, Supabase is the required market-data source. The included `render.yaml` installs the lightweight `requirements-render.txt` dependency set and sets `STOCKIFY_REQUIRE_SUPABASE=true` plus `STOCKIFY_LOAD_ARTIFACT_ENGINE=false`, so market overview, ticker forecasts, profiles, and portfolio simulations come from Supabase and do not silently fall back to local artifacts. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as Render secret environment variables before deploying. Keep the offline refresh job or GitHub Actions refresh configured so Supabase contains current `asset_universe`, `market_ohlcv_daily`, `asset_profile_snapshots`, `macro_observations`, `market_index_snapshots`, and `forecast_snapshots` rows.
+
+The artifact-backed RL endpoints (`/api/models`, `/api/inference`, `/api/explanations`, and `/api/backtests`) are disabled on Render by default with `STOCKIFY_LOAD_ARTIFACT_ENGINE=false`. Set it to `true` only if you also switch the Render build back to `requirements.txt` and intentionally want the deployed service to load bundled PPO/SAC artifacts.
+
 The local artifact rebuild path also reads `config/asset_universe.v1.json`, so rebuilt stock and ETF bundles use the same expanded universe as Supabase. If the rebuilt ticker count no longer matches an older PPO action space, the bundle temporarily switches to the deterministic signal policy until PPO is retrained.
 
-Market index cards can be refreshed from the configured market data provider when the backend starts. Startup index refresh is disabled by default to keep local reloads fast. Set `STOCKIFY_MARKET_INDEX_AUTO_REFRESH=true` to enable it with `config/market_indices.v1.json`, `STOCKIFY_MARKET_DATA_PROVIDER=yfinance`, and a 10-day lookback.
+Market index cards first read Supabase snapshots. If snapshots are missing on a fresh restart, `/api/market/indices` fetches the latest configured index levels on demand and caches them for the running backend. Startup index refresh is disabled by default to keep reloads fast. Set `STOCKIFY_MARKET_INDEX_AUTO_REFRESH=true` only if you want the backend to fetch and upsert index snapshots during startup.
 
 ## PPO Retraining
 

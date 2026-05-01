@@ -17,6 +17,7 @@ REQUIRED_SUPABASE_TABLES = (
     "market_ohlcv_daily",
     "asset_profile_snapshots",
     "macro_observations",
+    "market_index_snapshots",
     "forecast_snapshots",
     "refresh_runs",
     "refresh_run_items",

@@ -6,6 +6,7 @@ import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 
+from backend.app.ml.errors import ExplainabilityUnavailable
 from backend.app.ml.feature_groups import group_feature_values
 from backend.app.ml.pipeline import InferenceResult, StockifyEngine
 
@@ -19,10 +20,6 @@ class TargetExplanation:
     top_positive_drivers: list[dict]
     top_negative_drivers: list[dict]
     plain_language: str | None
-
-
-class ExplainabilityUnavailable(RuntimeError):
-    """Raised when SHAP is unavailable for the current environment."""
 
 
 def _build_target_map(result: InferenceResult) -> dict[str, np.ndarray]:

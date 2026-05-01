@@ -260,6 +260,54 @@ def test_backend_startup_refreshes_market_indices_without_supabase(tmp_path, mon
     reset_engine()
 
 
+def test_market_indices_fetch_on_demand_when_startup_refresh_is_disabled(tmp_path, monkeypatch):
+    artifact_root = build_fixture_artifact_tree(tmp_path)
+    dataset_root = tmp_path / "datasets"
+    dataset_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("STOCKIFY_MARKET_INDEX_AUTO_REFRESH", "false")
+
+    def fake_fetch(settings, *, repository=None):
+        return {
+            "enabled": True,
+            "provider": "fake",
+            "as_of_date": "2026-04-28",
+            "rows_written": 0,
+            "rows": [
+                {
+                    "symbol": "SP500",
+                    "as_of_date": "2026-04-28",
+                    "label": "S&P 500",
+                    "display_name": "S&P 500 Index",
+                    "provider_symbol": "^GSPC",
+                    "value": 5100.0,
+                    "previous_close": 5000.0,
+                    "change": 100.0,
+                    "change_percent": 0.02,
+                    "currency": "USD",
+                    "provider": "fake",
+                    "display_order": 1,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(app_main, "fetch_market_index_snapshots", fake_fetch)
+    reset_settings()
+    reset_engine()
+
+    with TestClient(app_main.create_app()) as test_client:
+        response = test_client.get("/api/market/indices")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source"] == "fake"
+        assert payload["indices"][0]["symbol"] == "SP500"
+
+    reset_settings()
+    reset_engine()
+
+
 def test_market_index_history_endpoint_returns_configured_history(client, monkeypatch):
     def fake_history(settings, *, symbol, history_range):
         assert symbol == "SP500"

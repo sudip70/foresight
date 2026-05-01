@@ -3,18 +3,23 @@ services:
     name: stockify-backend
     runtime: python
     plan: free
-    buildCommand: python3.11 -m pip install --upgrade pip && python3.11 -m pip install -r requirements.txt
+    buildCommand: python3.11 -m pip install --upgrade pip && python3.11 -m pip install -r requirements-render.txt
     startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.14
-      - key: STOCKIFY_ARTIFACT_ROOT
-        value: /opt/render/project/src/artifacts/processed
-      - key: STOCKIFY_DATASET_ROOT
-        value: /opt/render/project/src/datasets/raw
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: STOCKIFY_REQUIRE_SUPABASE
+        value: "true"
+      - key: STOCKIFY_LOAD_ARTIFACT_ENGINE
+        value: "false"
       - key: STOCKIFY_MARKET_DATA_PROVIDER
         value: yfinance
       - key: STOCKIFY_MARKET_INDEX_AUTO_REFRESH
-        value: "true"
+        value: "false"
       - key: STOCKIFY_MARKET_INDEX_REFRESH_LOOKBACK_DAYS
         value: "10"

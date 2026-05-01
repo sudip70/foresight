@@ -294,6 +294,16 @@ def refresh_market_index_snapshots(
     if not settings.market_index_auto_refresh:
         return {"enabled": False, "rows": [], "rows_written": 0}
 
+    return fetch_market_index_snapshots(settings, repository=repository)
+
+
+def fetch_market_index_snapshots(
+    settings: Settings,
+    *,
+    repository=None,
+) -> dict[str, Any]:
+    """Fetch the latest configured index levels without requiring startup refresh."""
+
     indices = load_market_index_config(settings.market_index_config_path)
     if not indices:
         return {"enabled": True, "rows": [], "rows_written": 0}

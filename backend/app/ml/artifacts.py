@@ -8,6 +8,7 @@ import joblib
 import numpy as np
 
 from backend.app.ml.envs import single_agent_observation_dim
+from backend.app.ml.errors import ArtifactValidationError
 from backend.app.ml.numpy_compat import install_numpy_pickle_compat
 from backend.app.ml.policies import load_policy
 
@@ -21,10 +22,6 @@ DEFAULT_MACRO_NAMES = [
     "cpi_all_items",
     "recession_indicator",
 ]
-
-
-class ArtifactValidationError(ValueError):
-    """Raised when processed artifacts are inconsistent."""
 
 
 @dataclass
