@@ -1,9 +1,6 @@
-name: Daily market refresh
+name: Manual Supabase market refresh
 
 on:
-  schedule:
-    # GitHub Actions uses UTC. 23:00 UTC is after the US market close year-round.
-    - cron: "0 23 * * 1-5"
   workflow_dispatch:
     inputs:
       mode:
@@ -15,9 +12,14 @@ on:
           - incremental
           - full
 
+concurrency:
+  group: daily-supabase-market-refresh
+  cancel-in-progress: true
+
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -28,15 +30,17 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt
-          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-refresh.txt
 
       - name: Refresh Supabase market data
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           STOCKIFY_MARKET_DATA_PROVIDER: yfinance
+          STOCKIFY_REFRESH_MODE: ${{ github.event.inputs.mode || 'incremental' }}
+          STOCKIFY_REFRESH_LOOKBACK_DAYS: "10"
+          STOCKIFY_REFRESH_FRESHNESS_DAYS: "10"
+          STOCKIFY_FORECAST_HORIZONS: "30,90,180,300"
+          STOCKIFY_FORECAST_WINDOW_SIZE: "60"
         run: |
-          MODE="${{ github.event.inputs.mode }}"
-          if [ -z "$MODE" ]; then MODE="incremental"; fi
-          python offline/supabase_refresh.py --mode "$MODE"
+          scripts/refresh_supabase_daily.sh

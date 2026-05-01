@@ -804,9 +804,13 @@ class SupabaseForecastEngine:
                 include_paths=False,
             )
             if snapshots:
+                latest_dates = self.repository.latest_ohlcv_dates_by_ticker()
                 for snapshot in snapshots:
                     metadata = active_metadata.get(snapshot.get("ticker"))
                     if metadata is None:
+                        continue
+                    latest_date = latest_dates.get(str(snapshot.get("ticker")))
+                    if latest_date and str(snapshot.get("as_of_date")) != latest_date:
                         continue
                     forecasts.append(
                         self._market_payload_from_snapshot(
@@ -816,28 +820,29 @@ class SupabaseForecastEngine:
                         )
                     )
                     covered_tickers.add(str(snapshot.get("ticker")))
-            if not forecasts:
-                fallback_limit = min(
-                    len(universe),
-                    max(max(int(top_n), 1) * 3, 20),
-                    60,
-                )
-                for row in universe[:fallback_limit]:
-                    ticker = str(row["ticker"])
-                    if ticker in covered_tickers:
-                        continue
-                    try:
-                        forecasts.append(
-                            self.build_ticker_forecast(
-                                ticker=ticker,
-                                horizon_days=horizon_days,
-                                window_size=window_size,
-                                prefer_snapshot=False,
-                                forecast_start_date=forecast_start_date,
-                            )
+            fallback_limit = min(
+                len(universe),
+                max(max(int(top_n), 1) * 3, 20),
+                60,
+            )
+            for row in universe[:fallback_limit]:
+                if len(forecasts) >= fallback_limit:
+                    break
+                ticker = str(row["ticker"])
+                if ticker in covered_tickers:
+                    continue
+                try:
+                    forecasts.append(
+                        self.build_ticker_forecast(
+                            ticker=ticker,
+                            horizon_days=horizon_days,
+                            window_size=window_size,
+                            prefer_snapshot=False,
+                            forecast_start_date=forecast_start_date,
                         )
-                    except ArtifactValidationError:
-                        continue
+                    )
+                except ArtifactValidationError:
+                    continue
             self._market_forecast_cache[cache_key] = [forecast.copy() for forecast in forecasts]
         if not forecasts:
             raise ArtifactValidationError("No Supabase tickers have enough market history")

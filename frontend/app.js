@@ -2085,8 +2085,10 @@ async function refreshActiveView({ force = false } = {}) {
     await ensureUniverse();
     await runSimulation();
     state.loaded.simulator = true;
-  } else if (tabName === "project" && !state.loaded.diagnostics) {
+  } else if (tabName === "project") {
+    await ensureUniverse();
     await refreshDiagnosticsInBackground();
+    renderProjectStory();
   }
 }
 
@@ -2393,7 +2395,7 @@ function renderCmdResults(query) {
     { label: "Market overview", tab: "market", icon: "market" },
     { label: "Ticker forecast", tab: "forecast", icon: "forecast" },
     { label: "Portfolio simulator", tab: "simulator", icon: "simulator" },
-    { label: "Project story", tab: "project", icon: "project" },
+    { label: "About", tab: "project", icon: "project" },
   ];
   tabs.forEach((t) => {
     if (!q || t.label.toLowerCase().includes(q)) {

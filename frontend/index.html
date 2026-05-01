@@ -43,6 +43,25 @@
         <path d="M8 7h8" />
         <path d="M8 11h6" />
       </symbol>
+      <symbol id="icon-github" viewBox="0 0 24 24">
+        <path d="M15 22v-4a4.8 4.8 0 0 0-1.3-3.5c4.3-.5 8.8-2.1 8.8-9.5A7.4 7.4 0 0 0 20.5 0 6.9 6.9 0 0 0 20 5.1 19 19 0 0 0 12 3a19 19 0 0 0-8 2.1A6.9 6.9 0 0 0 3.5 0a7.4 7.4 0 0 0-2 5c0 7.4 4.5 9 8.8 9.5A4.8 4.8 0 0 0 9 18v4" />
+        <path d="M9 18c-4.5 2-5-2-7-2" />
+      </symbol>
+      <symbol id="icon-linkedin" viewBox="0 0 24 24">
+        <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-4 0v7h-4v-7a6 6 0 0 1 6-6z" />
+        <rect x="2" y="9" width="4" height="12" />
+        <circle cx="4" cy="4" r="2" />
+      </symbol>
+      <symbol id="icon-globe" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3 12h18" />
+        <path d="M12 3a14 14 0 0 1 0 18" />
+        <path d="M12 3a14 14 0 0 0 0 18" />
+      </symbol>
+      <symbol id="icon-mail" viewBox="0 0 24 24">
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="m3 7 9 6 9-6" />
+      </symbol>
       <symbol id="icon-learn" viewBox="0 0 24 24">
         <path d="M22 10L12 5 2 10l10 5z" />
         <path d="M6 12.5V17c2 1.7 10 1.7 12 0v-4.5" />
@@ -116,7 +135,7 @@
           </button>
           <button class="nav-item" data-tab="project">
             <svg class="nav-icon" aria-hidden="true"><use href="#icon-project"></use></svg>
-            <span class="nav-label">Project</span>
+            <span class="nav-label">About</span>
           </button>
         </nav>
 
@@ -506,24 +525,66 @@
         <section id="project" class="workspace view">
           <div class="section-head sticky-head">
             <div>
-              <h1>Project story</h1>
+              <h1>About</h1>
               <p class="muted">
-                A full-stack ML financial literacy product built for beginner-friendly market education.
+                App context, system numbers, and builder profile.
               </p>
             </div>
           </div>
 
-          <article class="project-hero surface">
-            <div>
-              <h2>Foresight is a full-stack market intelligence and financial literacy app.</h2>
-              <p>
-                The app combines live market index history, market data refresh jobs, FastAPI
-                inference routes, ML/RL allocation artifacts, scenario forecasting, backtests,
-                explainability, and a polished frontend into one learning-oriented product.
+          <div class="about-layout">
+            <article class="surface about-project-card">
+              <div>
+                <h2>Foresight is a full-stack market intelligence and financial literacy platform.</h2>
+                <p>
+                  The app combines live market index history, market data refresh jobs, FastAPI
+                  inference routes, ML/RL allocation artifacts, scenario forecasting, backtests,
+                  explainability, and a polished frontend into one learning-oriented product.
+                </p>
+              </div>
+              <div id="projectStats" class="project-stats"></div>
+            </article>
+
+            <article class="surface about-profile-card">
+              <div class="about-profile-head">
+                <div class="about-avatar">
+                  <img
+                    src="https://github.com/sudip70.png?size=160"
+                    alt="Sudip Shrestha"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </div>
+                <div>
+                  <h2>Sudip Shrestha</h2>
+                  <p>Data Analyst &amp; AI Engineer</p>
+                </div>
+              </div>
+              <p class="about-profile-copy">
+                I am a data enthusiast with a background in software engineering and a passion
+                for transforming complex datasets into compelling visual stories. I am learning
+                and building ML models.
               </p>
-            </div>
-            <div id="projectStats" class="project-stats"></div>
-          </article>
+              <div class="about-links" aria-label="Sudip Shrestha links">
+                <a href="https://github.com/sudip70" target="_blank" rel="noreferrer">
+                  <svg class="ui-icon" aria-hidden="true"><use href="#icon-github"></use></svg>
+                  <span>GitHub</span>
+                </a>
+                <a href="https://www.linkedin.com/in/sudipshrestha-58/" target="_blank" rel="noreferrer">
+                  <svg class="ui-icon" aria-hidden="true"><use href="#icon-linkedin"></use></svg>
+                  <span>LinkedIn</span>
+                </a>
+                <a href="https://sudip70.github.io/" target="_blank" rel="noreferrer">
+                  <svg class="ui-icon" aria-hidden="true"><use href="#icon-globe"></use></svg>
+                  <span>Portfolio</span>
+                </a>
+                <a href="mailto:sudipshrestha.ca@gmail.com">
+                  <svg class="ui-icon" aria-hidden="true"><use href="#icon-mail"></use></svg>
+                  <span>Mail</span>
+                </a>
+              </div>
+            </article>
+          </div>
 
           <div class="project-grid">
             <article class="surface architecture-card">
@@ -542,7 +603,7 @@
                   <span class="architecture-step">02</span>
                   <h3>Refresh and storage</h3>
                   <ul>
-                    <li>GitHub Actions runs <code>offline/supabase_refresh.py</code> for daily Supabase updates</li>
+                    <li>Render cron runs <code>scripts/refresh_supabase_daily.sh</code> for daily Supabase updates</li>
                     <li>Supabase stores market history, profiles, macro context, index snapshots, and forecasts</li>
                     <li>Market index snapshots can refresh on demand when the first cards are missing</li>
                   </ul>
@@ -622,7 +683,7 @@
         <svg class="mobile-nav-icon" aria-hidden="true"><use href="#icon-simulator"></use></svg><span>Simulator</span>
       </button>
       <button class="mobile-nav-item" data-tab="project">
-        <svg class="mobile-nav-icon" aria-hidden="true"><use href="#icon-project"></use></svg><span>Project</span>
+        <svg class="mobile-nav-icon" aria-hidden="true"><use href="#icon-project"></use></svg><span>About</span>
       </button>
     </nav>
 
