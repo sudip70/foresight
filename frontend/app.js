@@ -1,4 +1,4 @@
-const DEPLOYED_API_BASE = "https://stockify-backend-adc6.onrender.com";
+const DEPLOYED_API_BASE = "https://foresight-backend-a5qx.onrender.com";
 const LOCAL_API_BASE = "http://localhost:8000";
 const API_TIMEOUT_MS = 45_000;
 
