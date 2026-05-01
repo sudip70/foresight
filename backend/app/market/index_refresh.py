@@ -202,11 +202,190 @@ def load_market_index_config(path: Path) -> list[dict[str, Any]]:
                 "label": row.get("label") or row["symbol"],
                 "display_name": row.get("display_name") or row.get("label") or row["symbol"],
                 "provider_symbol": row.get("provider_symbol") or row["symbol"],
+                "fallback_ticker": row.get("fallback_ticker"),
                 "currency": row.get("currency") or "USD",
                 "display_order": int(row.get("display_order") or 0),
             }
         )
     return normalized
+
+
+def _repository_index_history_rows(
+    repository,
+    *,
+    fallback_ticker: str,
+    lookback_days: int,
+) -> list[dict[str, Any]]:
+    rows = repository.get_ohlcv_history(fallback_ticker)
+    if not rows:
+        return []
+    cutoff = (date.today() - timedelta(days=lookback_days)).isoformat()
+    filtered = [row for row in rows if str(row.get("date")) >= cutoff]
+    if len(filtered) < 2:
+        filtered = rows[-min(len(rows), max(lookback_days, 2)) :]
+
+    history: list[dict[str, Any]] = []
+    previous_close = None
+    for row in filtered:
+        close = _clean_number(row.get("close"))
+        if close is None or close <= 0:
+            continue
+        change = None if previous_close is None else close - previous_close
+        change_percent = (
+            None
+            if previous_close is None or previous_close <= 0
+            else change / previous_close
+        )
+        history.append(
+            {
+                "date": row.get("date"),
+                "open": _clean_number(row.get("open")),
+                "high": _clean_number(row.get("high")),
+                "low": _clean_number(row.get("low")),
+                "close": close,
+                "adjusted_close": _clean_number(row.get("adjusted_close")),
+                "volume": _clean_number(row.get("volume")),
+                "change": change,
+                "change_percent": change_percent,
+            }
+        )
+        previous_close = close
+    return history
+
+
+def _history_summary(history: list[dict[str, Any]]) -> dict[str, Any]:
+    latest = history[-1]
+    previous = history[-2] if len(history) > 1 else latest
+    first_close = float(history[0]["close"])
+    latest_close = float(latest["close"])
+    closes = [float(row["close"]) for row in history]
+    return {
+        "first_date": history[0]["date"],
+        "latest_date": latest["date"],
+        "first_close": first_close,
+        "latest_close": latest_close,
+        "previous_close": previous["close"],
+        "change": None if len(history) <= 1 else latest_close - float(previous["close"]),
+        "change_percent": (
+            None
+            if len(history) <= 1 or float(previous["close"]) <= 0
+            else (latest_close - float(previous["close"])) / float(previous["close"])
+        ),
+        "range_return": (
+            None if first_close <= 0 else (latest_close - first_close) / first_close
+        ),
+        "high": max(closes),
+        "low": min(closes),
+        "points": len(history),
+    }
+
+
+def fetch_market_index_history_from_repository(
+    settings: Settings,
+    *,
+    repository,
+    symbol: str,
+    history_range: str = "1y",
+) -> dict[str, Any]:
+    normalized_range = history_range.strip().lower()
+    lookback_days = HISTORY_RANGE_LOOKBACK_DAYS.get(normalized_range)
+    if lookback_days is None:
+        supported = ", ".join(sorted(HISTORY_RANGE_LOOKBACK_DAYS))
+        raise ValueError(
+            f"Unsupported market index history range: {history_range}. Use {supported}."
+        )
+
+    normalized_symbol = symbol.strip().upper()
+    indices = load_market_index_config(settings.market_index_config_path)
+    index = next((row for row in indices if row["symbol"] == normalized_symbol), None)
+    if index is None:
+        raise ValueError(f"Unsupported market index symbol: {normalized_symbol}")
+    fallback_ticker = index.get("fallback_ticker")
+    if not fallback_ticker:
+        raise ValueError(f"No Supabase proxy history configured for {normalized_symbol}")
+
+    history = _repository_index_history_rows(
+        repository,
+        fallback_ticker=str(fallback_ticker),
+        lookback_days=lookback_days,
+    )
+    if not history:
+        raise ValueError(f"No Supabase proxy history returned for {normalized_symbol}")
+    summary = _history_summary(history)
+    return {
+        "source": "supabase_proxy",
+        "symbol": index["symbol"],
+        "label": index["label"],
+        "display_name": f"{index['display_name']} proxy",
+        "provider_symbol": str(fallback_ticker),
+        "currency": index["currency"],
+        "range": normalized_range,
+        "lookback_days": lookback_days,
+        "as_of_date": summary["latest_date"],
+        "history": history,
+        "summary": summary,
+        "disclaimer": (
+            f"Historical index chart uses {fallback_ticker} Supabase OHLCV as a proxy "
+            "when live index-provider history is unavailable."
+        ),
+    }
+
+
+def fetch_market_index_snapshots_from_repository(
+    settings: Settings,
+    *,
+    repository,
+) -> dict[str, Any]:
+    indices = load_market_index_config(settings.market_index_config_path)
+    rows: list[dict[str, Any]] = []
+    for index in indices:
+        fallback_ticker = index.get("fallback_ticker")
+        if not fallback_ticker:
+            continue
+        history = _repository_index_history_rows(
+            repository,
+            fallback_ticker=str(fallback_ticker),
+            lookback_days=max(settings.market_index_refresh_lookback_days, 2),
+        )
+        if not history:
+            continue
+        latest = history[-1]
+        previous = history[-2] if len(history) > 1 else latest
+        value = float(latest["close"])
+        previous_close = float(previous["close"])
+        change = None if len(history) <= 1 else value - previous_close
+        change_percent = (
+            None if len(history) <= 1 or previous_close <= 0 else change / previous_close
+        )
+        rows.append(
+            {
+                "symbol": index["symbol"],
+                "as_of_date": latest["date"],
+                "label": index["label"],
+                "display_name": f"{index['display_name']} proxy",
+                "provider_symbol": str(fallback_ticker),
+                "value": value,
+                "previous_close": previous_close,
+                "change": change,
+                "change_percent": change_percent,
+                "day_open": latest.get("open"),
+                "day_high": latest.get("high"),
+                "day_low": latest.get("low"),
+                "volume": latest.get("volume"),
+                "currency": index["currency"],
+                "provider": "supabase_proxy",
+                "display_order": index["display_order"],
+                "raw_payload": {"fallback_ticker": fallback_ticker},
+            }
+        )
+    as_of_dates = [str(row["as_of_date"]) for row in rows if row.get("as_of_date")]
+    return {
+        "enabled": True,
+        "provider": "supabase_proxy",
+        "as_of_date": max(as_of_dates) if as_of_dates else None,
+        "rows": rows,
+        "rows_written": 0,
+    }
 
 
 def fetch_market_index_history(

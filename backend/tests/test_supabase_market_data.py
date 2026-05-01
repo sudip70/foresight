@@ -73,6 +73,23 @@ def _ohlcv_rows(ticker="AAA", days=80):
     return rows
 
 
+def _proxy_ohlcv_rows(ticker: str, days: int = 80):
+    rows = _ohlcv_rows(ticker=ticker, days=days)
+    for index, row in enumerate(rows):
+        close = 400.0 + index
+        row.update(
+            {
+                "open": close - 1.0,
+                "high": close + 2.0,
+                "low": close - 2.0,
+                "close": close,
+                "adjusted_close": close,
+                "volume": 10_000_000 + index,
+            }
+        )
+    return rows
+
+
 def _seed_repository() -> InMemoryMarketDataRepository:
     repository = InMemoryMarketDataRepository()
     repository.upsert_universe(
@@ -500,6 +517,56 @@ def test_app_forecast_endpoints_work_from_market_repo_when_artifacts_are_broken(
         indices = client.get("/api/market/indices")
         assert indices.status_code == 200
         assert indices.json()["indices"][0]["symbol"] == "SP500"
+
+    reset_settings()
+    reset_engine()
+
+
+def test_market_indices_fall_back_to_supabase_proxy_history(tmp_path, monkeypatch):
+    repository = InMemoryMarketDataRepository()
+    repository.upsert_ohlcv(_proxy_ohlcv_rows("SPY"))
+    repository.upsert_ohlcv(_proxy_ohlcv_rows("QQQ"))
+    repository.upsert_ohlcv(_proxy_ohlcv_rows("DIA"))
+    artifact_root = tmp_path / "missing-artifacts"
+    dataset_root = tmp_path / "datasets"
+    dataset_root.mkdir()
+
+    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("STOCKIFY_REQUIRE_SUPABASE", "true")
+    monkeypatch.setenv("STOCKIFY_LOAD_ARTIFACT_ENGINE", "false")
+    monkeypatch.setattr(app_main, "build_market_repository", lambda settings: repository)
+    monkeypatch.setattr(
+        app_main,
+        "fetch_market_index_snapshots",
+        lambda settings, repository=None: (_ for _ in ()).throw(ValueError("provider failed")),
+    )
+    monkeypatch.setattr(
+        app_main,
+        "fetch_market_index_history",
+        lambda settings, *, symbol, history_range: (_ for _ in ()).throw(
+            ValueError("No index history returned")
+        ),
+    )
+    reset_settings()
+    reset_engine()
+
+    with TestClient(app_main.create_app()) as client:
+        indices = client.get("/api/market/indices")
+        assert indices.status_code == 200
+        assert indices.json()["source"] == "supabase_proxy"
+        assert {row["symbol"] for row in indices.json()["indices"]} == {
+            "SP500",
+            "NASDAQ",
+            "DOW",
+        }
+
+        history = client.get("/api/market/indices/SP500/history?range=1y")
+        assert history.status_code == 200
+        payload = history.json()
+        assert payload["source"] == "supabase_proxy"
+        assert payload["provider_symbol"] == "SPY"
+        assert payload["summary"]["points"] > 1
 
     reset_settings()
     reset_engine()
