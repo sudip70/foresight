@@ -1,6 +1,8 @@
-name: Manual Supabase market refresh
+name: Daily Supabase market refresh
 
 on:
+  schedule:
+    - cron: "30 23 * * *"
   workflow_dispatch:
     inputs:
       mode:
