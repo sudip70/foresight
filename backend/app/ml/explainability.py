@@ -8,7 +8,7 @@ from sklearn.model_selection import train_test_split
 
 from backend.app.ml.errors import ExplainabilityUnavailable
 from backend.app.ml.feature_groups import group_feature_values
-from backend.app.ml.pipeline import InferenceResult, StockifyEngine
+from backend.app.ml.pipeline import ForesightEngine, InferenceResult
 
 
 @dataclass
@@ -71,7 +71,7 @@ def _to_driver_list(grouped_contributions: dict[str, float], reverse: bool) -> l
 
 def build_explanations(
     *,
-    engine: StockifyEngine,
+    engine: ForesightEngine,
     inference_result: InferenceResult,
     amount: float,
     risk: float,

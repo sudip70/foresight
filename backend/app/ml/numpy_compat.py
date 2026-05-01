@@ -19,7 +19,7 @@ def install_numpy_pickle_compat() -> None:
         sys.modules.setdefault(alias, module)
 
     original_ctor = numpy_random_pickle.__bit_generator_ctor
-    if getattr(original_ctor, "_stockify_compat", False):
+    if getattr(original_ctor, "_foresight_compat", False):
         return
 
     def _compat_bit_generator_ctor(bit_generator_name="MT19937"):
@@ -27,5 +27,5 @@ def install_numpy_pickle_compat() -> None:
             bit_generator_name = getattr(bit_generator_name, "__name__", str(bit_generator_name))
         return original_ctor(bit_generator_name)
 
-    _compat_bit_generator_ctor._stockify_compat = True  # type: ignore[attr-defined]
+    _compat_bit_generator_ctor._foresight_compat = True  # type: ignore[attr-defined]
     numpy_random_pickle.__bit_generator_ctor = _compat_bit_generator_ctor

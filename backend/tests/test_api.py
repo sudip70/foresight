@@ -216,9 +216,9 @@ def test_backend_startup_refreshes_market_indices_without_supabase(tmp_path, mon
     dataset_root = tmp_path / "datasets"
     dataset_root.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
-    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
-    monkeypatch.setenv("STOCKIFY_MARKET_INDEX_AUTO_REFRESH", "true")
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_MARKET_INDEX_AUTO_REFRESH", "true")
 
     def fake_refresh(settings, *, repository=None):
         return {
@@ -265,9 +265,9 @@ def test_market_indices_fetch_on_demand_when_startup_refresh_is_disabled(tmp_pat
     dataset_root = tmp_path / "datasets"
     dataset_root.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
-    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
-    monkeypatch.setenv("STOCKIFY_MARKET_INDEX_AUTO_REFRESH", "false")
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_MARKET_INDEX_AUTO_REFRESH", "false")
 
     def fake_fetch(settings, *, repository=None):
         return {
@@ -360,9 +360,9 @@ def test_corrupted_artifacts_return_degraded_health_and_503(tmp_path, monkeypatc
     dataset_root = tmp_path / "datasets"
     dataset_root.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
-    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
-    monkeypatch.setenv("STOCKIFY_MARKET_INDEX_AUTO_REFRESH", "false")
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_MARKET_INDEX_AUTO_REFRESH", "false")
     reset_settings()
     reset_engine()
 

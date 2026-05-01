@@ -35,9 +35,7 @@ function initialApiBase() {
   const explicitApiBase = queryApiBase() || window.FORESIGHT_API_BASE;
   if (explicitApiBase) return normalizeApiBase(explicitApiBase);
 
-  const savedApiBase = normalizeApiBase(
-    localStorage.getItem("foresight-api-base") || localStorage.getItem("stockify-api-base"),
-  );
+  const savedApiBase = normalizeApiBase(localStorage.getItem("foresight-api-base"));
   const host = window.location?.hostname || "";
   if (savedApiBase && (isLocalHost(host) || !isLocalApiBase(savedApiBase))) {
     return savedApiBase;

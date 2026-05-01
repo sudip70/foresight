@@ -156,7 +156,7 @@ def _common_date_positions(dates: np.ndarray, common_dates: np.ndarray) -> np.nd
     return order[positions]
 
 
-class StockifyEngine:
+class ForesightEngine:
     def _meta_metadata(self) -> dict:
         if hasattr(self, "runtime"):
             return self.runtime.meta.metadata
@@ -2190,8 +2190,8 @@ class StockifyEngine:
 
 
 @lru_cache(maxsize=4)
-def get_engine(settings: Settings, *, strict_validation: bool = True) -> StockifyEngine:
-    return StockifyEngine(settings, strict_validation=strict_validation)
+def get_engine(settings: Settings, *, strict_validation: bool = True) -> ForesightEngine:
+    return ForesightEngine(settings, strict_validation=strict_validation)
 
 
 def reset_engine() -> None:

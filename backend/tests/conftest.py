@@ -15,13 +15,13 @@ def client(tmp_path, monkeypatch):
     dataset_root = tmp_path / "datasets"
     dataset_root.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
-    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
-    monkeypatch.setenv("STOCKIFY_SURROGATE_SAMPLE_SIZE", "24")
-    monkeypatch.setenv("STOCKIFY_SURROGATE_FIDELITY_THRESHOLD", "0.1")
-    monkeypatch.setenv("STOCKIFY_TOP_ASSET_TARGET_COUNT", "2")
-    monkeypatch.setenv("STOCKIFY_DEFAULT_BACKTEST_STEPS", "12")
-    monkeypatch.setenv("STOCKIFY_MARKET_INDEX_AUTO_REFRESH", "false")
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_SURROGATE_SAMPLE_SIZE", "24")
+    monkeypatch.setenv("FORESIGHT_SURROGATE_FIDELITY_THRESHOLD", "0.1")
+    monkeypatch.setenv("FORESIGHT_TOP_ASSET_TARGET_COUNT", "2")
+    monkeypatch.setenv("FORESIGHT_DEFAULT_BACKTEST_STEPS", "12")
+    monkeypatch.setenv("FORESIGHT_MARKET_INDEX_AUTO_REFRESH", "false")
 
     reset_settings()
     reset_engine()

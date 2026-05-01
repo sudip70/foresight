@@ -819,7 +819,7 @@ def train_meta_agent(
     train_env = DummyVecEnv([make_train_env])
     eval_env = DummyVecEnv([lambda: Monitor(make_eval_env())])
 
-    with tempfile.TemporaryDirectory(prefix="stockify_sac_meta_") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="foresight_sac_meta_") as tmp_dir:
         callback = EvalCallback(
             eval_env,
             best_model_save_path=tmp_dir,

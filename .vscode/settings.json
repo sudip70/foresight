@@ -1,6 +1,6 @@
 {
     "sonarlint.connectedMode.project": {
         "connectionId": "http-localhost-9000",
-        "projectKey": "Stockify"
+        "projectKey": "Foresight"
     }
 }

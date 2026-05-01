@@ -1000,7 +1000,7 @@ def train_asset_agent(
     )
     eval_env = DummyVecEnv([lambda: Monitor(make_eval_env())])
 
-    with tempfile.TemporaryDirectory(prefix=f"stockify_{asset_class}_ppo_") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix=f"foresight_{asset_class}_ppo_") as tmp_dir:
         callback = EvalCallback(
             eval_env,
             best_model_save_path=tmp_dir,

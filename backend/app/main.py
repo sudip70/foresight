@@ -304,7 +304,7 @@ def create_app() -> FastAPI:
             except Exception as exc:  # pragma: no cover - defensive startup path
                 app.state.engine_error = exc
         else:
-            app.state.engine_error = "Artifact engine disabled by STOCKIFY_LOAD_ARTIFACT_ENGINE=false"
+            app.state.engine_error = "Artifact engine disabled by FORESIGHT_LOAD_ARTIFACT_ENGINE=false"
         yield
 
     app = FastAPI(

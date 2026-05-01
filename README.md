@@ -65,7 +65,7 @@ The frontend expects the backend base URL to be configurable from the page so it
 
 The repository includes `.github/workflows/gh-pages.yml`, which deploys only the static files in `frontend/`. In GitHub, set **Settings → Pages → Build and deployment → Source** to **GitHub Actions** so that workflow is used.
 
-When the app is served from GitHub Pages or another non-local hostname, the frontend defaults to the Render backend at `https://stockify-backend-adc6.onrender.com`. Local development still defaults to `http://localhost:8000`. You can override the backend from the in-app Settings panel or by opening the page with `?apiBase=https://your-backend.example.com`.
+When the app is served from GitHub Pages or another non-local hostname, the frontend defaults to the current Render backend at `https://stockify-backend-adc6.onrender.com`. Local development still defaults to `http://localhost:8000`. Keep this URL until Render confirms the renamed Foresight service URL, then update `DEPLOYED_API_BASE` and this section. You can override the backend from the in-app Settings panel or by opening the page with `?apiBase=https://your-backend.example.com`.
 
 If Pages is accidentally configured to deploy from the `main` branch root, the root `index.html` redirects visitors to `frontend/`, but the GitHub Actions deployment is the preferred setup.
 
@@ -111,7 +111,7 @@ Foresight can now use Supabase as the source of truth for ticker intelligence, c
 ```bash
 export SUPABASE_URL="https://your-project-ref.supabase.co"
 export SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
-export STOCKIFY_MARKET_DATA_PROVIDER="yfinance"
+export FORESIGHT_MARKET_DATA_PROVIDER="yfinance"
 ```
 
 3. Seed or refresh the expanded universe:
@@ -129,19 +129,19 @@ scripts/refresh_supabase_daily.sh
 
 The job is idempotent: it upserts `asset_universe`, `market_ohlcv_daily`, `asset_profile_snapshots`, `macro_observations`, `market_index_snapshots`, `forecast_snapshots`, and refresh run logs. It precomputes default forecast horizons of 30, 90, 180, and 300 days.
 
-The included Render Blueprint creates a `stockify-daily-market-refresh` cron job that runs `scripts/refresh_supabase_daily.sh` every day at 23:30 UTC. It reuses `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from the `stockify-backend` Render service. The GitHub Actions workflow `.github/workflows/daily-market-refresh.yml` is manual-only as an optional fallback.
+The included Render Blueprint creates a `foresight-daily-market-refresh` cron job that runs `scripts/refresh_supabase_daily.sh` every day at 23:30 UTC. It reuses `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from the `foresight-backend` Render service. The GitHub Actions workflow `.github/workflows/daily-market-refresh.yml` is manual-only as an optional fallback.
 
-The wrapper script supports environment overrides: `STOCKIFY_REFRESH_MODE`, `STOCKIFY_REFRESH_LOOKBACK_DAYS`, `STOCKIFY_REFRESH_FRESHNESS_DAYS`, `STOCKIFY_FORECAST_HORIZONS`, `STOCKIFY_FORECAST_WINDOW_SIZE`, `STOCKIFY_REFRESH_START_DATE`, `STOCKIFY_REFRESH_END_DATE`, and `STOCKIFY_REFRESH_DRY_RUN=true`.
+The wrapper script supports environment overrides: `FORESIGHT_REFRESH_MODE`, `FORESIGHT_REFRESH_LOOKBACK_DAYS`, `FORESIGHT_REFRESH_FRESHNESS_DAYS`, `FORESIGHT_FORECAST_HORIZONS`, `FORESIGHT_FORECAST_WINDOW_SIZE`, `FORESIGHT_REFRESH_START_DATE`, `FORESIGHT_REFRESH_END_DATE`, and `FORESIGHT_REFRESH_DRY_RUN=true`. Legacy `STOCKIFY_*` env vars are still read as fallbacks during the rename.
 
 The FastAPI app prefers Supabase-backed market data when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present. If they are absent, it falls back to the current artifact-backed dashboard.
 
-For the Render deployment, Supabase is the required market-data source. The included `render.yaml` installs the lightweight `requirements-render.txt` dependency set for the web service and `requirements-refresh.txt` for the cron job. It sets `STOCKIFY_REQUIRE_SUPABASE=true` plus `STOCKIFY_LOAD_ARTIFACT_ENGINE=false`, so market overview, ticker forecasts, profiles, and portfolio simulations come from Supabase and do not silently fall back to local artifacts. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as Render secret environment variables on `stockify-backend`; the cron job references those values from the web service.
+For the Render deployment, Supabase is the required market-data source. The included `render.yaml` installs the lightweight `requirements-render.txt` dependency set for the web service and `requirements-refresh.txt` for the cron job. It sets `FORESIGHT_REQUIRE_SUPABASE=true` plus `FORESIGHT_LOAD_ARTIFACT_ENGINE=false`, so market overview, ticker forecasts, profiles, and portfolio simulations come from Supabase and do not silently fall back to local artifacts. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as Render secret environment variables on `foresight-backend`; the cron job references those values from the web service.
 
-The artifact-backed RL endpoints (`/api/models`, `/api/inference`, `/api/explanations`, and `/api/backtests`) are disabled on Render by default with `STOCKIFY_LOAD_ARTIFACT_ENGINE=false`. Set it to `true` only if you also switch the Render build back to `requirements.txt` and intentionally want the deployed service to load bundled PPO/SAC artifacts.
+The artifact-backed RL endpoints (`/api/models`, `/api/inference`, `/api/explanations`, and `/api/backtests`) are disabled on Render by default with `FORESIGHT_LOAD_ARTIFACT_ENGINE=false`. Set it to `true` only if you also switch the Render build back to `requirements.txt` and intentionally want the deployed service to load bundled PPO/SAC artifacts.
 
 The local artifact rebuild path also reads `config/asset_universe.v1.json`, so rebuilt stock and ETF bundles use the same expanded universe as Supabase. If the rebuilt ticker count no longer matches an older PPO action space, the bundle temporarily switches to the deterministic signal policy until PPO is retrained.
 
-Market index cards first read Supabase snapshots. If snapshots are missing on a fresh restart, `/api/market/indices` fetches the latest configured index levels on demand and caches them for the running backend. Startup index refresh is disabled by default to keep reloads fast. Set `STOCKIFY_MARKET_INDEX_AUTO_REFRESH=true` only if you want the backend to fetch and upsert index snapshots during startup.
+Market index cards first read Supabase snapshots. If snapshots are missing on a fresh restart, `/api/market/indices` fetches the latest configured index levels on demand and caches them for the running backend. Startup index refresh is disabled by default to keep reloads fast. Set `FORESIGHT_MARKET_INDEX_AUTO_REFRESH=true` only if you want the backend to fetch and upsert index snapshots during startup.
 
 ## PPO Retraining
 

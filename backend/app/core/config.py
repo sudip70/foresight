@@ -39,6 +39,22 @@ class Settings:
 _settings: Settings | None = None
 
 
+def _env(name: str, default: object = "") -> str:
+    preferred = os.getenv(f"FORESIGHT_{name}")
+    if preferred is not None:
+        return preferred
+
+    legacy = os.getenv(f"STOCKIFY_{name}")
+    if legacy is not None:
+        return legacy
+
+    return str(default)
+
+
+def _env_bool(name: str, default: str) -> bool:
+    return _env(name, default).lower() in {"1", "true", "yes", "on"}
+
+
 def get_settings() -> Settings:
     global _settings
     if _settings is not None:
@@ -47,49 +63,35 @@ def get_settings() -> Settings:
     _settings = Settings(
         project_name="Foresight Backend",
         api_prefix="/api",
-        artifact_root=Path(
-            os.getenv("STOCKIFY_ARTIFACT_ROOT", REPO_ROOT / "artifacts" / "processed")
-        ),
-        dataset_root=Path(
-            os.getenv("STOCKIFY_DATASET_ROOT", REPO_ROOT / "datasets" / "raw")
-        ),
-        surrogate_sample_size=int(os.getenv("STOCKIFY_SURROGATE_SAMPLE_SIZE", "128")),
-        surrogate_fidelity_threshold=float(
-            os.getenv("STOCKIFY_SURROGATE_FIDELITY_THRESHOLD", "0.55")
-        ),
-        top_asset_target_count=int(os.getenv("STOCKIFY_TOP_ASSET_TARGET_COUNT", "3")),
-        default_backtest_steps=int(os.getenv("STOCKIFY_DEFAULT_BACKTEST_STEPS", "252")),
-        meta_max_asset_weight=float(os.getenv("STOCKIFY_META_MAX_ASSET_WEIGHT", "0.20")),
-        meta_max_stock_weight=float(os.getenv("STOCKIFY_META_MAX_STOCK_WEIGHT", "0.85")),
-        meta_max_crypto_weight=float(os.getenv("STOCKIFY_META_MAX_CRYPTO_WEIGHT", "0.30")),
-        meta_max_etf_weight=float(os.getenv("STOCKIFY_META_MAX_ETF_WEIGHT", "0.70")),
-        meta_max_cash_weight=float(os.getenv("STOCKIFY_META_MAX_CASH_WEIGHT", "0.95")),
-        meta_min_expected_daily_return=float(
-            os.getenv("STOCKIFY_META_MIN_EXPECTED_DAILY_RETURN", "0.0")
-        ),
-        meta_cash_enabled=os.getenv("STOCKIFY_META_CASH_ENABLED", "true").lower()
-        in {"1", "true", "yes", "on"},
-        meta_cash_annual_return=float(os.getenv("STOCKIFY_META_CASH_ANNUAL_RETURN", "0.04")),
-        market_data_provider=os.getenv("STOCKIFY_MARKET_DATA_PROVIDER", "yfinance"),
-        market_index_auto_refresh=os.getenv(
-            "STOCKIFY_MARKET_INDEX_AUTO_REFRESH", "false"
-        ).lower()
-        in {"1", "true", "yes", "on"},
+        artifact_root=Path(_env("ARTIFACT_ROOT", REPO_ROOT / "artifacts" / "processed")),
+        dataset_root=Path(_env("DATASET_ROOT", REPO_ROOT / "datasets" / "raw")),
+        surrogate_sample_size=int(_env("SURROGATE_SAMPLE_SIZE", "128")),
+        surrogate_fidelity_threshold=float(_env("SURROGATE_FIDELITY_THRESHOLD", "0.55")),
+        top_asset_target_count=int(_env("TOP_ASSET_TARGET_COUNT", "3")),
+        default_backtest_steps=int(_env("DEFAULT_BACKTEST_STEPS", "252")),
+        meta_max_asset_weight=float(_env("META_MAX_ASSET_WEIGHT", "0.20")),
+        meta_max_stock_weight=float(_env("META_MAX_STOCK_WEIGHT", "0.85")),
+        meta_max_crypto_weight=float(_env("META_MAX_CRYPTO_WEIGHT", "0.30")),
+        meta_max_etf_weight=float(_env("META_MAX_ETF_WEIGHT", "0.70")),
+        meta_max_cash_weight=float(_env("META_MAX_CASH_WEIGHT", "0.95")),
+        meta_min_expected_daily_return=float(_env("META_MIN_EXPECTED_DAILY_RETURN", "0.0")),
+        meta_cash_enabled=_env_bool("META_CASH_ENABLED", "true"),
+        meta_cash_annual_return=float(_env("META_CASH_ANNUAL_RETURN", "0.04")),
+        market_data_provider=_env("MARKET_DATA_PROVIDER", "yfinance"),
+        market_index_auto_refresh=_env_bool("MARKET_INDEX_AUTO_REFRESH", "false"),
         market_index_config_path=Path(
-            os.getenv(
-                "STOCKIFY_MARKET_INDEX_CONFIG_PATH",
+            _env(
+                "MARKET_INDEX_CONFIG_PATH",
                 REPO_ROOT / "config" / "market_indices.v1.json",
             )
         ),
         market_index_refresh_lookback_days=int(
-            os.getenv("STOCKIFY_MARKET_INDEX_REFRESH_LOOKBACK_DAYS", "10")
+            _env("MARKET_INDEX_REFRESH_LOOKBACK_DAYS", "10")
         ),
         supabase_url=os.getenv("SUPABASE_URL", ""),
         supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
-        require_supabase=os.getenv("STOCKIFY_REQUIRE_SUPABASE", "false").lower()
-        in {"1", "true", "yes", "on"},
-        load_artifact_engine=os.getenv("STOCKIFY_LOAD_ARTIFACT_ENGINE", "true").lower()
-        in {"1", "true", "yes", "on"},
+        require_supabase=_env_bool("REQUIRE_SUPABASE", "false"),
+        load_artifact_engine=_env_bool("LOAD_ARTIFACT_ENGINE", "true"),
     )
     return _settings
 
