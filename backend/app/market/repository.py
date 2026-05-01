@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from functools import cached_property
 import uuid
 from typing import Any, Protocol
 
@@ -21,6 +22,26 @@ REQUIRED_SUPABASE_TABLES = (
     "forecast_snapshots",
     "refresh_runs",
     "refresh_run_items",
+)
+FORECAST_SUMMARY_FIELDS = ",".join(
+    (
+        "ticker",
+        "as_of_date",
+        "horizon_days",
+        "window_size",
+        "method_version",
+        "latest_price",
+        "bear_target",
+        "base_target",
+        "bull_target",
+        "bear_return",
+        "base_return",
+        "bull_return",
+        "volatility",
+        "drawdown",
+        "confidence",
+        "confidence_label",
+    )
 )
 
 
@@ -66,6 +87,7 @@ class MarketDataRepository(Protocol):
         horizon_days: int,
         window_size: int,
         method_version: str = FORECAST_METHOD_VERSION,
+        include_paths: bool = True,
     ) -> list[dict[str, Any]]: ...
 
     def deactivate_missing_universe(self, active_tickers: set[str]) -> int: ...
@@ -88,6 +110,10 @@ class SupabaseMarketDataRepository:
     url: str
     service_role_key: str
     timeout_seconds: float = 30.0
+
+    @cached_property
+    def client(self) -> httpx.Client:
+        return httpx.Client(timeout=self.timeout_seconds)
 
     @property
     def rest_url(self) -> str:
@@ -113,14 +139,13 @@ class SupabaseMarketDataRepository:
         prefer: str | None = None,
     ) -> Any:
         try:
-            with httpx.Client(timeout=self.timeout_seconds) as client:
-                response = client.request(
-                    method,
-                    f"{self.rest_url}/{table}",
-                    params=params,
-                    json=json_body,
-                    headers=self._headers(prefer=prefer),
-                )
+            response = self.client.request(
+                method,
+                f"{self.rest_url}/{table}",
+                params=params,
+                json=json_body,
+                headers=self._headers(prefer=prefer),
+            )
             response.raise_for_status()
             if response.content:
                 return response.json()
@@ -454,11 +479,12 @@ class SupabaseMarketDataRepository:
         horizon_days: int,
         window_size: int,
         method_version: str = FORECAST_METHOD_VERSION,
+        include_paths: bool = True,
     ) -> list[dict[str, Any]]:
         rows = self._get(
             "forecast_snapshots",
             {
-                "select": "*",
+                "select": "*" if include_paths else FORECAST_SUMMARY_FIELDS,
                 "horizon_days": f"eq.{int(horizon_days)}",
                 "window_size": f"eq.{int(window_size)}",
                 "method_version": f"eq.{method_version}",
@@ -700,6 +726,7 @@ class InMemoryMarketDataRepository:
         horizon_days: int,
         window_size: int,
         method_version: str = FORECAST_METHOD_VERSION,
+        include_paths: bool = True,
     ) -> list[dict[str, Any]]:
         rows = [
             row

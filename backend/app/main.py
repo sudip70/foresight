@@ -271,6 +271,7 @@ def create_app() -> FastAPI:
         app.state.market_index_rows = []
         app.state.market_index_refresh_result = None
         app.state.market_index_refresh_error = None
+        app.state.market_index_history_cache = {}
         try:
             repository = _load_market_repository()
             if repository is not None and hasattr(repository, "validate_schema"):
@@ -499,24 +500,40 @@ def create_app() -> FastAPI:
             pattern="^(1m|3m|6m|1y|5y)$",
         ),
     ):
+        normalized_symbol = symbol.strip().upper()
+        normalized_range = history_range.strip().lower()
+        cache_key = (normalized_symbol, normalized_range)
+        history_cache = getattr(app.state, "market_index_history_cache", {})
+        if cache_key in history_cache:
+            return history_cache[cache_key]
+        repository = getattr(app.state, "market_repository", None)
+        if repository is not None:
+            try:
+                payload = fetch_market_index_history_from_repository(
+                    settings,
+                    repository=repository,
+                    symbol=normalized_symbol,
+                    history_range=normalized_range,
+                )
+                history_cache[cache_key] = payload
+                app.state.market_index_history_cache = history_cache
+                return payload
+            except ValueError as repository_exc:
+                if "Unsupported market index symbol" in str(repository_exc):
+                    raise HTTPException(
+                        status_code=404,
+                        detail=str(repository_exc),
+                    ) from repository_exc
         try:
-            return fetch_market_index_history(
+            payload = fetch_market_index_history(
                 settings,
-                symbol=symbol,
-                history_range=history_range,
+                symbol=normalized_symbol,
+                history_range=normalized_range,
             )
+            history_cache[cache_key] = payload
+            app.state.market_index_history_cache = history_cache
+            return payload
         except ValueError as exc:
-            repository = getattr(app.state, "market_repository", None)
-            if repository is not None:
-                try:
-                    return fetch_market_index_history_from_repository(
-                        settings,
-                        repository=repository,
-                        symbol=symbol,
-                        history_range=history_range,
-                    )
-                except ValueError:
-                    pass
             message = str(exc)
             if "Unsupported market index symbol" in message:
                 raise HTTPException(status_code=404, detail=message) from exc
