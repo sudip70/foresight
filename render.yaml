@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: stockify-backend
+    name: foresight-backend
     runtime: python
     plan: free
     buildCommand: python3.11 -m pip install --upgrade pip && python3.11 -m pip install -r requirements-render.txt
@@ -13,19 +13,19 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      - key: STOCKIFY_REQUIRE_SUPABASE
+      - key: FORESIGHT_REQUIRE_SUPABASE
         value: "true"
-      - key: STOCKIFY_LOAD_ARTIFACT_ENGINE
+      - key: FORESIGHT_LOAD_ARTIFACT_ENGINE
         value: "false"
-      - key: STOCKIFY_MARKET_DATA_PROVIDER
+      - key: FORESIGHT_MARKET_DATA_PROVIDER
         value: yfinance
-      - key: STOCKIFY_MARKET_INDEX_AUTO_REFRESH
+      - key: FORESIGHT_MARKET_INDEX_AUTO_REFRESH
         value: "false"
-      - key: STOCKIFY_MARKET_INDEX_REFRESH_LOOKBACK_DAYS
+      - key: FORESIGHT_MARKET_INDEX_REFRESH_LOOKBACK_DAYS
         value: "10"
 
   - type: cron
-    name: stockify-daily-market-refresh
+    name: foresight-daily-market-refresh
     runtime: python
     plan: starter
     schedule: "30 23 * * *"
@@ -37,22 +37,22 @@ services:
       - key: SUPABASE_URL
         fromService:
           type: web
-          name: stockify-backend
+          name: foresight-backend
           envVarKey: SUPABASE_URL
       - key: SUPABASE_SERVICE_ROLE_KEY
         fromService:
           type: web
-          name: stockify-backend
+          name: foresight-backend
           envVarKey: SUPABASE_SERVICE_ROLE_KEY
-      - key: STOCKIFY_MARKET_DATA_PROVIDER
+      - key: FORESIGHT_MARKET_DATA_PROVIDER
         value: yfinance
-      - key: STOCKIFY_REFRESH_MODE
+      - key: FORESIGHT_REFRESH_MODE
         value: incremental
-      - key: STOCKIFY_REFRESH_LOOKBACK_DAYS
+      - key: FORESIGHT_REFRESH_LOOKBACK_DAYS
         value: "10"
-      - key: STOCKIFY_REFRESH_FRESHNESS_DAYS
+      - key: FORESIGHT_REFRESH_FRESHNESS_DAYS
         value: "10"
-      - key: STOCKIFY_FORECAST_HORIZONS
+      - key: FORESIGHT_FORECAST_HORIZONS
         value: "30,90,180,300"
-      - key: STOCKIFY_FORECAST_WINDOW_SIZE
+      - key: FORESIGHT_FORECAST_WINDOW_SIZE
         value: "60"

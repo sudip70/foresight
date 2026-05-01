@@ -11,10 +11,10 @@ def test_explanations_return_unavailable_when_threshold_is_too_high(tmp_path, mo
     dataset_root = tmp_path / "datasets"
     dataset_root.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
-    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
-    monkeypatch.setenv("STOCKIFY_SURROGATE_SAMPLE_SIZE", "24")
-    monkeypatch.setenv("STOCKIFY_SURROGATE_FIDELITY_THRESHOLD", "1.1")
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_SURROGATE_SAMPLE_SIZE", "24")
+    monkeypatch.setenv("FORESIGHT_SURROGATE_FIDELITY_THRESHOLD", "1.1")
 
     reset_settings()
     reset_engine()

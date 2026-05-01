@@ -128,7 +128,7 @@ def _score_report(report: dict) -> float:
 
 
 def _evaluate_trial(asset_dir: Path, asset_class: str, config: PPOTrainingConfig) -> dict:
-    with tempfile.TemporaryDirectory(prefix=f"stockify_tune_{asset_class}_") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix=f"foresight_tune_{asset_class}_") as tmp_dir:
         tmp_root = Path(tmp_dir) / "processed"
         tmp_asset_dir = tmp_root / asset_class
         shutil.copytree(asset_dir, tmp_asset_dir)

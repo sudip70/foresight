@@ -1,1 +1,1 @@
-"""Canonical ML runtime modules for Stockify."""
+"""Canonical ML runtime modules for Foresight."""

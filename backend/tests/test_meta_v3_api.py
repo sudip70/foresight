@@ -11,8 +11,8 @@ def test_v3_models_endpoint_reports_shared_macro_architecture(tmp_path, monkeypa
     dataset_root = tmp_path / "datasets"
     dataset_root.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
-    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
 
     reset_settings()
     reset_engine()
@@ -33,9 +33,9 @@ def test_v3_inference_uses_global_macro_snapshot_and_cash_aware_sub_agents(tmp_p
     dataset_root = tmp_path / "datasets"
     dataset_root.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
-    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
-    monkeypatch.setenv("STOCKIFY_TOP_ASSET_TARGET_COUNT", "2")
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_TOP_ASSET_TARGET_COUNT", "2")
 
     reset_settings()
     reset_engine()

@@ -433,7 +433,10 @@ def build_parser() -> ArgumentParser:
     )
     parser.add_argument(
         "--provider",
-        default=os.getenv("STOCKIFY_MARKET_DATA_PROVIDER", "yfinance"),
+        default=os.getenv(
+            "FORESIGHT_MARKET_DATA_PROVIDER",
+            os.getenv("STOCKIFY_MARKET_DATA_PROVIDER", "yfinance"),
+        ),
     )
     parser.add_argument("--mode", choices=["incremental", "full"], default="incremental")
     parser.add_argument("--lookback-days", type=int, default=10)

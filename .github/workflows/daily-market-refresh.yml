@@ -36,11 +36,11 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          STOCKIFY_MARKET_DATA_PROVIDER: yfinance
-          STOCKIFY_REFRESH_MODE: ${{ github.event.inputs.mode || 'incremental' }}
-          STOCKIFY_REFRESH_LOOKBACK_DAYS: "10"
-          STOCKIFY_REFRESH_FRESHNESS_DAYS: "10"
-          STOCKIFY_FORECAST_HORIZONS: "30,90,180,300"
-          STOCKIFY_FORECAST_WINDOW_SIZE: "60"
+          FORESIGHT_MARKET_DATA_PROVIDER: yfinance
+          FORESIGHT_REFRESH_MODE: ${{ github.event.inputs.mode || 'incremental' }}
+          FORESIGHT_REFRESH_LOOKBACK_DAYS: "10"
+          FORESIGHT_REFRESH_FRESHNESS_DAYS: "10"
+          FORESIGHT_FORECAST_HORIZONS: "30,90,180,300"
+          FORESIGHT_FORECAST_WINDOW_SIZE: "60"
         run: |
           scripts/refresh_supabase_daily.sh

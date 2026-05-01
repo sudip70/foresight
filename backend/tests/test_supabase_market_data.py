@@ -467,8 +467,8 @@ def test_app_forecast_endpoints_work_from_market_repo_when_artifacts_are_broken(
     dataset_root = tmp_path / "datasets"
     dataset_root.mkdir()
 
-    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
-    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
     monkeypatch.setattr(app_main, "build_market_repository", lambda settings: repository)
     reset_settings()
     reset_engine()
@@ -531,10 +531,10 @@ def test_market_indices_fall_back_to_supabase_proxy_history(tmp_path, monkeypatc
     dataset_root = tmp_path / "datasets"
     dataset_root.mkdir()
 
-    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
-    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
-    monkeypatch.setenv("STOCKIFY_REQUIRE_SUPABASE", "true")
-    monkeypatch.setenv("STOCKIFY_LOAD_ARTIFACT_ENGINE", "false")
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_REQUIRE_SUPABASE", "true")
+    monkeypatch.setenv("FORESIGHT_LOAD_ARTIFACT_ENGINE", "false")
     monkeypatch.setattr(app_main, "build_market_repository", lambda settings: repository)
     monkeypatch.setattr(
         app_main,
@@ -578,10 +578,10 @@ def test_render_supabase_mode_does_not_load_artifact_engine(tmp_path, monkeypatc
     dataset_root = tmp_path / "datasets"
     dataset_root.mkdir()
 
-    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
-    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
-    monkeypatch.setenv("STOCKIFY_REQUIRE_SUPABASE", "true")
-    monkeypatch.setenv("STOCKIFY_LOAD_ARTIFACT_ENGINE", "false")
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_REQUIRE_SUPABASE", "true")
+    monkeypatch.setenv("FORESIGHT_LOAD_ARTIFACT_ENGINE", "false")
     monkeypatch.setattr(app_main, "build_market_repository", lambda settings: repository)
     reset_settings()
     reset_engine()
@@ -616,10 +616,10 @@ def test_required_supabase_mode_reports_unhealthy_without_repository(tmp_path, m
     dataset_root = tmp_path / "datasets"
     dataset_root.mkdir()
 
-    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
-    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
-    monkeypatch.setenv("STOCKIFY_REQUIRE_SUPABASE", "true")
-    monkeypatch.setenv("STOCKIFY_LOAD_ARTIFACT_ENGINE", "false")
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_REQUIRE_SUPABASE", "true")
+    monkeypatch.setenv("FORESIGHT_LOAD_ARTIFACT_ENGINE", "false")
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
     monkeypatch.setattr(app_main, "build_market_repository", lambda settings: None)
@@ -646,10 +646,10 @@ def test_required_supabase_mode_reports_unhealthy_when_schema_validation_fails(
     dataset_root = tmp_path / "datasets"
     dataset_root.mkdir()
 
-    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
-    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
-    monkeypatch.setenv("STOCKIFY_REQUIRE_SUPABASE", "true")
-    monkeypatch.setenv("STOCKIFY_LOAD_ARTIFACT_ENGINE", "false")
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_REQUIRE_SUPABASE", "true")
+    monkeypatch.setenv("FORESIGHT_LOAD_ARTIFACT_ENGINE", "false")
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test")
     monkeypatch.setattr(app_main, "build_market_repository", lambda settings: BrokenRepository())
