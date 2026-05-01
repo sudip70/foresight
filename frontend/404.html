@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Foresight</title>
+    <script>
+      const segments = window.location.pathname.split("/").filter(Boolean);
+      const root =
+        window.location.hostname.endsWith("github.io") && segments.length
+          ? `/${segments[0]}/`
+          : "/";
+      window.location.replace(root);
+    </script>
+  </head>
+  <body>
+    <p><a href="./">Open Foresight</a></p>
+  </body>
+</html>
