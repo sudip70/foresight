@@ -1,18 +1,18 @@
 {
   "action_dim": 26,
-  "algorithm": "signal",
+  "algorithm": "ppo",
   "aligned_rows": 2846,
   "asset_class": "stock",
   "benchmark_ticker": "SPY",
   "cash_enabled": true,
   "date_end": "2026-04-28",
   "date_start": "2015-01-02",
-  "eval_mean_benchmark_alpha": -2.318259177214644e-05,
-  "eval_mean_final_value": 1.4056879448379087,
-  "eval_mean_max_drawdown": 0.09631665766435338,
-  "eval_mean_reward": -106.71245658548273,
-  "eval_mean_sharpe": 2.478256739438951,
-  "eval_rows": 629,
+  "eval_mean_benchmark_alpha": -0.00015127132218768042,
+  "eval_mean_final_value": 1.2317248329177757,
+  "eval_mean_max_drawdown": 0.06572979325853501,
+  "eval_mean_reward": -111.63392522769986,
+  "eval_mean_sharpe": 2.3029974474996924,
+  "eval_rows": 630,
   "feature_selection": {
     "macro_dropped_indices": [],
     "macro_original_count": 6,
@@ -23,7 +23,7 @@
     "micro_selected_count": 250,
     "micro_source": "micro_indicators_raw.npy"
   },
-  "feature_version": "ohlcv-v2",
+  "feature_version": "ohlcv-stationary-v4-cash-sleeve",
   "macro_feature_count": 6,
   "macro_feature_names": [
     "VIX Market Volatility",
@@ -290,7 +290,7 @@
     "williams_r",
     "atr"
   ],
-  "model_file": "signal_policy.json",
+  "model_file": "model.zip",
   "ohlcv_shape": [
     2846,
     25,
@@ -302,15 +302,15 @@
     "prices": 2610,
     "regimes": 2610
   },
-  "policy_backend": "single_agent_signal",
+  "policy_backend": "sb3",
   "policy_replaced_reason": "Existing PPO action dimension did not match the rebuilt ticker universe. Retrain PPO to replace this deterministic signal policy.",
   "ppo_eval_mean_final_value": 1.6383561046678412,
   "ppo_eval_mean_reward": 0.4495506966270873,
-  "ppo_retrained_at": "2026-04-24T20:33:18.461358+00:00",
+  "ppo_retrained_at": "2026-04-30T23:49:27.322703+00:00",
   "ppo_training_config": {
     "activation_fn": "tanh",
     "batch_size": 256,
-    "benchmark_reward_scale": 0.4,
+    "benchmark_reward_scale": 0.25,
     "cash_annual_return": 0.04,
     "cash_enabled": true,
     "clip_range": 0.2,
@@ -318,9 +318,9 @@
     "clip_range_schedule": "constant",
     "concentration_penalty_scale": 0.01,
     "device": "cpu",
-    "diversification_reward_scale": 0.15,
+    "diversification_reward_scale": 0.1,
     "downside_penalty_scale": 0.25,
-    "drawdown_penalty_scale": 0.03,
+    "drawdown_penalty_scale": 0.02,
     "ent_coef": 0.015,
     "episode_length": 252,
     "eval_episodes": 5,
@@ -329,7 +329,7 @@
     "feature_clip": 5.0,
     "gae_lambda": 0.95,
     "gamma": 0.995,
-    "horizon_reward_scale": 1.2,
+    "horizon_reward_scale": 1.0,
     "learning_rate": 0.00025,
     "learning_rate_final": 5e-05,
     "learning_rate_schedule": "linear",
@@ -348,8 +348,8 @@
     ],
     "random_start": true,
     "reward_scale": 100.0,
-    "risk_high": 0.95,
-    "risk_low": 0.05,
+    "risk_high": 0.8,
+    "risk_low": 0.2,
     "sde_sample_freq": -1,
     "seed": 42,
     "target_daily_volatility": 0.014,
@@ -357,7 +357,7 @@
     "target_volatility_penalty_scale": 0.2,
     "total_timesteps": 300000,
     "transaction_fee": 0.001,
-    "turnover_penalty": 0.002,
+    "turnover_penalty": 0.001,
     "use_sde": false,
     "variance_penalty_scale": 1.0,
     "vf_coef": 0.5,
@@ -373,12 +373,12 @@
     "min_feature_variance": 1e-10
   },
   "sub_agent_architecture": {
-    "action_dim": 11,
+    "action_dim": 26,
     "cash_sleeve_enabled": true,
     "objective": "horizon_return_plus_diversification",
     "risk_cash_cap": "0.08 + (1 - risk) * 0.42, capped by max_cash_weight",
     "risk_concentration_target": "equal_weight_hhi + risk * (0.45 - equal_weight_hhi)",
-    "risky_asset_count": 10
+    "risky_asset_count": 25
   },
   "ticker_count": 25,
   "tickers": [
@@ -408,7 +408,7 @@
     "DIS",
     "NFLX"
   ],
-  "train_rows": 2273,
+  "train_rows": 2276,
   "trimmed": false,
   "uses_ohlcv_features": true
 }

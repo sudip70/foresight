@@ -32,6 +32,7 @@ from backend.app.core.config import REPO_ROOT, get_settings
 from backend.app.market.forecasting import SupabaseForecastEngine
 from backend.app.market.index_refresh import (
     fetch_market_index_history,
+    fetch_market_index_snapshots,
     refresh_market_index_snapshots,
 )
 from backend.app.market.repository import (
@@ -39,12 +40,12 @@ from backend.app.market.repository import (
     build_market_repository,
     empty_refresh_status,
 )
-from backend.app.ml.artifacts import ArtifactValidationError
-from backend.app.ml.explainability import ExplainabilityUnavailable, build_explanations
-from backend.app.ml.pipeline import get_engine
+from backend.app.ml.errors import ArtifactValidationError, ExplainabilityUnavailable
 
 
 def _load_engine():
+    from backend.app.ml.pipeline import get_engine
+
     return get_engine(get_settings(), strict_validation=True)
 
 
@@ -63,6 +64,14 @@ def _degraded_health_payload(app: FastAPI) -> dict:
     settings = get_settings()
     error = getattr(app.state, "engine_error", None)
     market_data = _market_health_payload(app)
+    repository_error = getattr(app.state, "market_repository_error", None)
+    if market_data is None and repository_error is not None:
+        market_data = {
+            "configured": bool(settings.supabase_url and settings.supabase_service_role_key),
+            "status": "unavailable",
+            "source": "supabase",
+            "error": str(repository_error),
+        }
     market_ready = bool(market_data and market_data.get("status") == "ok")
     return {
         "status": "ok" if market_ready else "degraded",
@@ -80,6 +89,16 @@ def _degraded_health_payload(app: FastAPI) -> dict:
     }
 
 
+def _raise_if_required_supabase_unavailable(payload: dict) -> None:
+    settings = get_settings()
+    market_data = payload.get("market_data") or {}
+    if settings.require_supabase and market_data.get("status") != "ok":
+        raise HTTPException(
+            status_code=503,
+            detail=market_data.get("error") or "Supabase market data is required but unavailable",
+        )
+
+
 def _require_engine(app: FastAPI):
     engine = getattr(app.state, "engine", None)
     if engine is None:
@@ -93,6 +112,11 @@ def _require_engine(app: FastAPI):
 
 def _market_forecast_engine(app: FastAPI):
     return getattr(app.state, "forecast_engine", None)
+
+
+def _allow_artifact_fallback() -> bool:
+    settings = get_settings()
+    return settings.load_artifact_engine and not settings.require_supabase
 
 
 def _market_index_cache_payload(app: FastAPI) -> dict:
@@ -109,6 +133,17 @@ def _market_index_cache_payload(app: FastAPI) -> dict:
         "indices": sorted(rows, key=lambda row: int(row.get("display_order") or 0)),
         "disclaimer": disclaimer,
     }
+
+
+def _market_index_live_payload(app: FastAPI) -> dict:
+    refresh_result = fetch_market_index_snapshots(
+        get_settings(),
+        repository=getattr(app.state, "market_repository", None),
+    )
+    app.state.market_index_refresh_result = refresh_result
+    app.state.market_index_rows = refresh_result.get("rows", []) or []
+    app.state.market_index_refresh_error = None
+    return _market_index_cache_payload(app)
 
 
 def _local_refresh_status_payload(app: FastAPI) -> dict:
@@ -215,10 +250,13 @@ def create_app() -> FastAPI:
         app.state.market_index_refresh_result = None
         app.state.market_index_refresh_error = None
         try:
-            app.state.market_repository = _load_market_repository()
-            if app.state.market_repository is not None:
+            repository = _load_market_repository()
+            if repository is not None and hasattr(repository, "validate_schema"):
+                repository.validate_schema()
+            app.state.market_repository = repository
+            if repository is not None:
                 app.state.forecast_engine = SupabaseForecastEngine(
-                    app.state.market_repository,
+                    repository,
                     settings,
                 )
         except Exception as exc:  # pragma: no cover - defensive startup path
@@ -237,10 +275,13 @@ def create_app() -> FastAPI:
                 app.state.market_index_rows = refresh_result.get("rows", [])
             except Exception as exc:  # pragma: no cover - provider/network defensive path
                 app.state.market_index_refresh_error = exc
-        try:
-            app.state.engine = _load_engine()
-        except Exception as exc:  # pragma: no cover - defensive startup path
-            app.state.engine_error = exc
+        if settings.load_artifact_engine:
+            try:
+                app.state.engine = _load_engine()
+            except Exception as exc:  # pragma: no cover - defensive startup path
+                app.state.engine_error = exc
+        else:
+            app.state.engine_error = "Artifact engine disabled by STOCKIFY_LOAD_ARTIFACT_ENGINE=false"
         yield
 
     app = FastAPI(
@@ -261,10 +302,13 @@ def create_app() -> FastAPI:
     def health():
         engine = getattr(app.state, "engine", None)
         if engine is None:
-            return _degraded_health_payload(app)
+            payload = _degraded_health_payload(app)
+            _raise_if_required_supabase_unavailable(payload)
+            return payload
         payload = engine.health_payload()
         payload["ready"] = True
         payload["market_data"] = _market_health_payload(app)
+        _raise_if_required_supabase_unavailable(payload)
         return payload
 
     @app.get(f"{settings.api_prefix}/models", response_model=ModelsResponse)
@@ -285,7 +329,11 @@ def create_app() -> FastAPI:
                 try:
                     return forecast_engine.universe_payload()
                 except (ArtifactValidationError, MarketDataUnavailable):
+                    if not _allow_artifact_fallback():
+                        raise
                     pass
+            if not _allow_artifact_fallback():
+                raise HTTPException(status_code=503, detail="Supabase market data is not available")
             engine = _require_engine(app)
             return engine.universe_payload()
         except HTTPException:
@@ -303,7 +351,11 @@ def create_app() -> FastAPI:
                 try:
                     return forecast_engine.ticker_profile_payload(ticker)
                 except (ArtifactValidationError, MarketDataUnavailable):
+                    if not _allow_artifact_fallback():
+                        raise
                     pass
+            if not _allow_artifact_fallback():
+                raise HTTPException(status_code=503, detail="Supabase market data is not available")
             engine = _require_engine(app)
             return _artifact_profile_payload(engine, ticker)
         except HTTPException:
@@ -325,7 +377,11 @@ def create_app() -> FastAPI:
                         window_size=request.window_size,
                     )
                 except (ArtifactValidationError, MarketDataUnavailable):
+                    if not _allow_artifact_fallback():
+                        raise
                     pass
+            if not _allow_artifact_fallback():
+                raise HTTPException(status_code=503, detail="Supabase market data is not available")
             engine = _require_engine(app)
             return engine.run_ticker_forecast(
                 ticker=request.ticker,
@@ -352,7 +408,11 @@ def create_app() -> FastAPI:
                         window_size=request.window_size,
                     )
                 except (ArtifactValidationError, MarketDataUnavailable):
+                    if not _allow_artifact_fallback():
+                        raise
                     pass
+            if not _allow_artifact_fallback():
+                raise HTTPException(status_code=503, detail="Supabase market data is not available")
             engine = _require_engine(app)
             return engine.run_market_forecast(
                 horizon_days=request.horizon_days,
@@ -371,17 +431,34 @@ def create_app() -> FastAPI:
     def market_indices():
         forecast_engine = _market_forecast_engine(app)
         if forecast_engine is None:
-            return _market_index_cache_payload(app)
+            cache_payload = _market_index_cache_payload(app)
+            if cache_payload["indices"]:
+                return cache_payload
+            try:
+                return _market_index_live_payload(app)
+            except Exception as exc:  # pragma: no cover - provider/network defensive path
+                app.state.market_index_refresh_error = exc
+                return _market_index_cache_payload(app)
         try:
             payload = forecast_engine.market_indices_payload()
             if payload.get("indices"):
                 return payload
-            return _market_index_cache_payload(app)
+            cache_payload = _market_index_cache_payload(app)
+            if cache_payload["indices"]:
+                return cache_payload
+            try:
+                return _market_index_live_payload(app)
+            except Exception as exc:  # pragma: no cover - provider/network defensive path
+                app.state.market_index_refresh_error = exc
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
         except MarketDataUnavailable as exc:
             cache_payload = _market_index_cache_payload(app)
             if cache_payload["indices"]:
                 return cache_payload
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            try:
+                return _market_index_live_payload(app)
+            except Exception:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Exception as exc:  # pragma: no cover - defensive
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -432,7 +509,11 @@ def create_app() -> FastAPI:
                         window_size=request.window_size,
                     )
                 except (ArtifactValidationError, MarketDataUnavailable):
+                    if not _allow_artifact_fallback():
+                        raise
                     pass
+            if not _allow_artifact_fallback():
+                raise HTTPException(status_code=503, detail="Supabase market data is not available")
             engine = _require_engine(app)
             return engine.run_portfolio_simulation(
                 amount=request.amount,
@@ -489,6 +570,8 @@ def create_app() -> FastAPI:
     @app.post(f"{settings.api_prefix}/explanations", response_model=ExplanationResponse)
     def explanations(request: ExplanationRequest):
         try:
+            from backend.app.ml.explainability import build_explanations
+
             engine = _require_engine(app)
             inference_result = engine.run_inference(
                 amount=request.amount,

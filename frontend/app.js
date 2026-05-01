@@ -1689,6 +1689,9 @@ function renderProjectStory() {
   const assetCount = refresh.asset_count ?? state.universe?.tickers?.length;
   const featureGroups = models.feature_groups ? Object.keys(models.feature_groups).length : 0;
   const explainability = models.explainability?.method || "surrogate explainability";
+  const modelSurface = models.feature_groups
+    ? `model metadata, ${formatInteger(featureGroups)} feature groups, forecasts, simulations, backtests, and ${explainability}`
+    : "Supabase-backed forecasts, portfolio simulations, refresh diagnostics, and optional artifact endpoints for local RL workflows";
   const statusLabel = state.health
     ? health.ready === false
       ? "Degraded"
@@ -1707,11 +1710,11 @@ function renderProjectStory() {
     elements.projectHighlights.innerHTML = [
       lessonCard(
         "Full-stack product thinking",
-        "The project connects a beginner-friendly interface to real backend APIs, model artifacts, market index history, refresh jobs, and portfolio simulation logic.",
+        "The project connects a beginner-friendly interface to real backend APIs, Supabase market data, market index history, refresh jobs, and portfolio simulation logic.",
       ),
       lessonCard(
         "ML system design",
-        `The backend exposes model metadata, ${formatInteger(featureGroups)} feature groups, forecasts, simulations, backtests, and ${explainability}.`,
+        `The backend exposes ${modelSurface}.`,
       ),
       lessonCard(
         "Market data UX",

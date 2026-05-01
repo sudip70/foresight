@@ -32,6 +32,8 @@ class Settings:
     market_index_refresh_lookback_days: int
     supabase_url: str
     supabase_service_role_key: str
+    require_supabase: bool
+    load_artifact_engine: bool
 
 
 _settings: Settings | None = None
@@ -84,6 +86,10 @@ def get_settings() -> Settings:
         ),
         supabase_url=os.getenv("SUPABASE_URL", ""),
         supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
+        require_supabase=os.getenv("STOCKIFY_REQUIRE_SUPABASE", "false").lower()
+        in {"1", "true", "yes", "on"},
+        load_artifact_engine=os.getenv("STOCKIFY_LOAD_ARTIFACT_ENGINE", "true").lower()
+        in {"1", "true", "yes", "on"},
     )
     return _settings
 

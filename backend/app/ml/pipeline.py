@@ -10,6 +10,10 @@ import math
 import numpy as np
 
 from backend.app.core.config import Settings
+from backend.app.market.simulation import (
+    allocate_simulation_risky_weights,
+    select_diversified_simulation_forecasts,
+)
 from backend.app.ml.artifacts import (
     ASSET_CLASSES,
     AssetArtifacts,
@@ -992,9 +996,14 @@ class StockifyEngine:
             ranked = self.run_market_forecast(
                 horizon_days=horizon_days,
                 risk=risk_value,
-                top_n=10,
+                top_n=1000,
                 window_size=window_size,
             )["ranked_tickers"]
+            ranked = select_diversified_simulation_forecasts(
+                ranked,
+                risk=risk_value,
+                limit=10,
+            )
 
         chosen = ranked[: min(len(ranked), 10)]
         if not chosen:
@@ -1021,14 +1030,15 @@ class StockifyEngine:
             cash_weight = min(0.45, cash_weight + 0.12)
         risky_budget = max(1.0 - cash_weight, 0.0)
         max_asset_weight = 0.18 + (0.07 * risk_value)
-        risky_weights = normalize_weights_with_caps(
+        risky_weights = allocate_simulation_risky_weights(
+            chosen,
             raw_scores,
-            np.full(raw_scores.shape[0], max_asset_weight / max(risky_budget, 1e-12)),
+            risky_budget=risky_budget,
+            risk=risk_value,
+            max_asset_weight=max_asset_weight,
         )
-        risky_weights = risky_weights * risky_budget
 
         allocations = []
-        class_weights: dict[str, float] = {}
         bear_return = cash_weight * cash_return
         base_return = cash_weight * cash_return
         bull_return = cash_weight * cash_return
@@ -1046,9 +1056,6 @@ class StockifyEngine:
                     "bull_return": float(forecast["returns"]["bull"]),
                     "confidence": float(forecast["confidence"]),
                 }
-            )
-            class_weights[forecast["asset_class"]] = (
-                class_weights.get(forecast["asset_class"], 0.0) + weight_value
             )
             bear_return += weight_value * float(forecast["returns"]["bear"])
             base_return += weight_value * float(forecast["returns"]["base"])
@@ -1068,7 +1075,6 @@ class StockifyEngine:
                     "confidence": 0.95,
                 }
             )
-            class_weights[CASH_ASSET_CLASS] = cash_weight
             confidence_values.append(0.95)
 
         total_weight = sum(allocation["weight"] for allocation in allocations)
@@ -1077,6 +1083,12 @@ class StockifyEngine:
                 allocation["weight"] = float(allocation["weight"] / total_weight)
                 allocation["amount"] = float(allocation["weight"] * amount)
 
+        class_weights: dict[str, float] = {}
+        for allocation in allocations:
+            class_weights[allocation["asset_class"]] = (
+                class_weights.get(allocation["asset_class"], 0.0)
+                + float(allocation["weight"])
+            )
         class_allocations = [
             {
                 "asset_class": asset_class,

@@ -7,7 +7,11 @@ from fastapi.testclient import TestClient
 from backend.app.core.config import reset_settings
 import backend.app.main as app_main
 from backend.app.market.forecasting import SupabaseForecastEngine
-from backend.app.market.repository import InMemoryMarketDataRepository, SupabaseMarketDataRepository
+from backend.app.market.repository import (
+    InMemoryMarketDataRepository,
+    MarketDataUnavailable,
+    SupabaseMarketDataRepository,
+)
 from backend.app.ml.pipeline import reset_engine
 from backend.tests.helpers import build_fixture_artifact_tree
 from offline.supabase_refresh import run_refresh
@@ -454,6 +458,99 @@ def test_app_forecast_endpoints_work_from_market_repo_when_artifacts_are_broken(
         indices = client.get("/api/market/indices")
         assert indices.status_code == 200
         assert indices.json()["indices"][0]["symbol"] == "SP500"
+
+    reset_settings()
+    reset_engine()
+
+
+def test_render_supabase_mode_does_not_load_artifact_engine(tmp_path, monkeypatch):
+    repository = _seed_repository()
+    artifact_root = tmp_path / "missing-artifacts"
+    dataset_root = tmp_path / "datasets"
+    dataset_root.mkdir()
+
+    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("STOCKIFY_REQUIRE_SUPABASE", "true")
+    monkeypatch.setenv("STOCKIFY_LOAD_ARTIFACT_ENGINE", "false")
+    monkeypatch.setattr(app_main, "build_market_repository", lambda settings: repository)
+    reset_settings()
+    reset_engine()
+
+    with TestClient(app_main.create_app()) as client:
+        health = client.get("/api/health")
+        assert health.status_code == 200
+        assert health.json()["status"] == "ok"
+        assert health.json()["ready"] is True
+        assert health.json()["market_data"]["source"] == "memory"
+
+        universe = client.get("/api/universe")
+        assert universe.status_code == 200
+        assert universe.json()["source"] == "supabase"
+
+        forecast = client.post(
+            "/api/forecasts/ticker",
+            json={"ticker": "AAA", "horizon_days": 30, "window_size": 20},
+        )
+        assert forecast.status_code == 200
+        assert forecast.json()["source"] == "supabase_ohlcv"
+
+        models = client.get("/api/models")
+        assert models.status_code == 503
+
+    reset_settings()
+    reset_engine()
+
+
+def test_required_supabase_mode_reports_unhealthy_without_repository(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "missing-artifacts"
+    dataset_root = tmp_path / "datasets"
+    dataset_root.mkdir()
+
+    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("STOCKIFY_REQUIRE_SUPABASE", "true")
+    monkeypatch.setenv("STOCKIFY_LOAD_ARTIFACT_ENGINE", "false")
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.setattr(app_main, "build_market_repository", lambda settings: None)
+    reset_settings()
+    reset_engine()
+
+    with TestClient(app_main.create_app()) as client:
+        health = client.get("/api/health")
+        assert health.status_code == 503
+        assert "Supabase market data is required" in health.json()["detail"]
+
+    reset_settings()
+    reset_engine()
+
+
+def test_required_supabase_mode_reports_unhealthy_when_schema_validation_fails(
+    tmp_path, monkeypatch
+):
+    class BrokenRepository(InMemoryMarketDataRepository):
+        def validate_schema(self):
+            raise MarketDataUnavailable("missing market_index_snapshots table")
+
+    artifact_root = tmp_path / "missing-artifacts"
+    dataset_root = tmp_path / "datasets"
+    dataset_root.mkdir()
+
+    monkeypatch.setenv("STOCKIFY_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("STOCKIFY_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("STOCKIFY_REQUIRE_SUPABASE", "true")
+    monkeypatch.setenv("STOCKIFY_LOAD_ARTIFACT_ENGINE", "false")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test")
+    monkeypatch.setattr(app_main, "build_market_repository", lambda settings: BrokenRepository())
+    reset_settings()
+    reset_engine()
+
+    with TestClient(app_main.create_app()) as client:
+        health = client.get("/api/health")
+        assert health.status_code == 503
+        assert "missing market_index_snapshots table" in health.json()["detail"]
 
     reset_settings()
     reset_engine()

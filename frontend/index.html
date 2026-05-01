@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
+    <script defer src="https://cloud.umami.is/script.js" data-website-id="39a871e4-0554-4159-bb8d-2d2ced68bd07"></script>
     <title>Foresight</title>
     <script>
       try {
@@ -541,16 +542,16 @@
                   <h3>Refresh and storage</h3>
                   <ul>
                     <li>GitHub Actions runs <code>offline/supabase_refresh.py</code> for daily Supabase updates</li>
-                    <li>Local rebuild path writes processed <code>.npy</code> artifacts for artifact fallback</li>
-                    <li>Market index snapshots refresh at backend startup when enabled</li>
+                    <li>Supabase stores market history, profiles, macro context, index snapshots, and forecasts</li>
+                    <li>Market index snapshots can refresh on demand when the first cards are missing</li>
                   </ul>
                 </section>
                 <section class="architecture-node">
                   <span class="architecture-step">03</span>
                   <h3>FastAPI model layer</h3>
                   <ul>
-                    <li>Supabase forecast engine serves stored and on-demand forecasts</li>
-                    <li>Artifact engine supports ticker forecasts, simulation, RL allocation, and backtests</li>
+                    <li>Supabase forecast engine serves market overview, ticker profiles, forecasts, and simulations</li>
+                    <li>Local artifact engine remains available for optional RL diagnostics and backtests</li>
                     <li>Index endpoints serve latest cards and historical chart series</li>
                   </ul>
                 </section>
@@ -568,9 +569,9 @@
                 <div>
                   <span class="eyebrow">Runtime contract</span>
                   <p>
-                    The FastAPI app prefers Supabase when <code>SUPABASE_URL</code> and
-                    <code>SUPABASE_SERVICE_ROLE_KEY</code> are configured, then falls back to local model
-                    artifacts so the dashboard still works offline.
+                    Render runs with Supabase required through <code>SUPABASE_URL</code> and
+                    <code>SUPABASE_SERVICE_ROLE_KEY</code>. Local development can still enable artifact
+                    fallback for offline diagnostics.
                   </p>
                 </div>
                 <div>

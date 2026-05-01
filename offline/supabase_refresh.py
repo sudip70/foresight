@@ -21,7 +21,7 @@ from backend.app.market.repository import (
     InMemoryMarketDataRepository,
     SupabaseMarketDataRepository,
 )
-from backend.app.ml.artifacts import ArtifactValidationError
+from backend.app.ml.errors import ArtifactValidationError
 from offline.market_data_providers import MarketDataProvider, build_provider
 
 
