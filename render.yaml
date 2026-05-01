@@ -23,3 +23,36 @@ services:
         value: "false"
       - key: STOCKIFY_MARKET_INDEX_REFRESH_LOOKBACK_DAYS
         value: "10"
+
+  - type: cron
+    name: stockify-daily-market-refresh
+    runtime: python
+    plan: starter
+    schedule: "30 23 * * *"
+    buildCommand: python3.11 -m pip install --upgrade pip && python3.11 -m pip install -r requirements-refresh.txt
+    startCommand: scripts/refresh_supabase_daily.sh
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.14
+      - key: SUPABASE_URL
+        fromService:
+          type: web
+          name: stockify-backend
+          envVarKey: SUPABASE_URL
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        fromService:
+          type: web
+          name: stockify-backend
+          envVarKey: SUPABASE_SERVICE_ROLE_KEY
+      - key: STOCKIFY_MARKET_DATA_PROVIDER
+        value: yfinance
+      - key: STOCKIFY_REFRESH_MODE
+        value: incremental
+      - key: STOCKIFY_REFRESH_LOOKBACK_DAYS
+        value: "10"
+      - key: STOCKIFY_REFRESH_FRESHNESS_DAYS
+        value: "10"
+      - key: STOCKIFY_FORECAST_HORIZONS
+        value: "30,90,180,300"
+      - key: STOCKIFY_FORECAST_WINDOW_SIZE
+        value: "60"

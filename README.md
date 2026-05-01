@@ -124,14 +124,18 @@ python offline/supabase_refresh.py --mode full
 4. For daily updates, run the incremental job after market close:
 
 ```bash
-python offline/supabase_refresh.py --mode incremental --lookback-days 10
+scripts/refresh_supabase_daily.sh
 ```
 
-The job is idempotent: it upserts `asset_universe`, `market_ohlcv_daily`, `asset_profile_snapshots`, `macro_observations`, `market_index_snapshots`, `forecast_snapshots`, and refresh run logs. It precomputes default forecast horizons of 30, 90, 180, and 300 days. The included GitHub Actions workflow `.github/workflows/daily-market-refresh.yml` runs the incremental refresh at 23:00 UTC Monday-Friday when Supabase secrets are configured.
+The job is idempotent: it upserts `asset_universe`, `market_ohlcv_daily`, `asset_profile_snapshots`, `macro_observations`, `market_index_snapshots`, `forecast_snapshots`, and refresh run logs. It precomputes default forecast horizons of 30, 90, 180, and 300 days.
+
+The included Render Blueprint creates a `stockify-daily-market-refresh` cron job that runs `scripts/refresh_supabase_daily.sh` every day at 23:30 UTC. It reuses `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from the `stockify-backend` Render service. The GitHub Actions workflow `.github/workflows/daily-market-refresh.yml` is manual-only as an optional fallback.
+
+The wrapper script supports environment overrides: `STOCKIFY_REFRESH_MODE`, `STOCKIFY_REFRESH_LOOKBACK_DAYS`, `STOCKIFY_REFRESH_FRESHNESS_DAYS`, `STOCKIFY_FORECAST_HORIZONS`, `STOCKIFY_FORECAST_WINDOW_SIZE`, `STOCKIFY_REFRESH_START_DATE`, `STOCKIFY_REFRESH_END_DATE`, and `STOCKIFY_REFRESH_DRY_RUN=true`.
 
 The FastAPI app prefers Supabase-backed market data when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present. If they are absent, it falls back to the current artifact-backed dashboard.
 
-For the Render deployment, Supabase is the required market-data source. The included `render.yaml` installs the lightweight `requirements-render.txt` dependency set and sets `STOCKIFY_REQUIRE_SUPABASE=true` plus `STOCKIFY_LOAD_ARTIFACT_ENGINE=false`, so market overview, ticker forecasts, profiles, and portfolio simulations come from Supabase and do not silently fall back to local artifacts. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as Render secret environment variables before deploying. Keep the offline refresh job or GitHub Actions refresh configured so Supabase contains current `asset_universe`, `market_ohlcv_daily`, `asset_profile_snapshots`, `macro_observations`, `market_index_snapshots`, and `forecast_snapshots` rows.
+For the Render deployment, Supabase is the required market-data source. The included `render.yaml` installs the lightweight `requirements-render.txt` dependency set for the web service and `requirements-refresh.txt` for the cron job. It sets `STOCKIFY_REQUIRE_SUPABASE=true` plus `STOCKIFY_LOAD_ARTIFACT_ENGINE=false`, so market overview, ticker forecasts, profiles, and portfolio simulations come from Supabase and do not silently fall back to local artifacts. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as Render secret environment variables on `stockify-backend`; the cron job references those values from the web service.
 
 The artifact-backed RL endpoints (`/api/models`, `/api/inference`, `/api/explanations`, and `/api/backtests`) are disabled on Render by default with `STOCKIFY_LOAD_ARTIFACT_ENGINE=false`. Set it to `true` only if you also switch the Render build back to `requirements.txt` and intentionally want the deployed service to load bundled PPO/SAC artifacts.
 

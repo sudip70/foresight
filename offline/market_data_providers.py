@@ -8,7 +8,15 @@ from typing import Any, Protocol
 import numpy as np
 import pandas as pd
 
-from offline.market_pipeline import MACRO_FEATURE_COLUMNS, OHLCV_FIELDS
+OHLCV_FIELDS = ("Open", "High", "Low", "Close", "Volume")
+MACRO_FEATURE_COLUMNS = (
+    "VIX Market Volatility",
+    "Federal Funds Rate",
+    "10-Year Treasury Yield",
+    "Unemployment Rate",
+    "CPI All Items",
+    "Recession Indicator",
+)
 
 
 class MarketDataProvider(Protocol):
