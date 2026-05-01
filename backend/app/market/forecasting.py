@@ -146,6 +146,7 @@ class SupabaseForecastEngine:
         self._market_forecast_cache: dict[tuple[int, int, str], list[dict[str, Any]]] = {}
         self._macro_payload_cache: dict[str, Any] | None = None
         self._universe_payload_cache: dict[str, Any] | None = None
+        self._ticker_rows_cache: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
 
     def _cash_daily_return(self) -> float:
         return float((1.0 + self.settings.meta_cash_annual_return) ** (1.0 / 252.0) - 1.0)
@@ -168,6 +169,10 @@ class SupabaseForecastEngine:
 
     def _ticker_rows(self, ticker: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         normalized = _normalize_ticker(ticker)
+        cached = self._ticker_rows_cache.get(normalized)
+        if cached is not None:
+            metadata, rows = cached
+            return dict(metadata), [dict(row) for row in rows]
         metadata = self.repository.ticker_metadata(normalized)
         if metadata is None:
             raise ArtifactValidationError(f"Unsupported ticker: {ticker}")
@@ -176,6 +181,7 @@ class SupabaseForecastEngine:
             raise ArtifactValidationError(
                 f"Not enough Supabase market rows for {normalized}: {len(rows)}"
             )
+        self._ticker_rows_cache[normalized] = (dict(metadata), [dict(row) for row in rows])
         return metadata, rows
 
     def _prepare_price_series(self, rows: list[dict[str, Any]]) -> tuple[np.ndarray, list[str]]:
@@ -795,15 +801,12 @@ class SupabaseForecastEngine:
             snapshots = self.repository.list_latest_forecast_snapshots(
                 horizon_days=horizon_days,
                 window_size=window_size,
+                include_paths=False,
             )
             if snapshots:
-                latest_dates = self.repository.latest_ohlcv_dates_by_ticker()
                 for snapshot in snapshots:
                     metadata = active_metadata.get(snapshot.get("ticker"))
                     if metadata is None:
-                        continue
-                    latest_date = latest_dates.get(str(snapshot.get("ticker")))
-                    if latest_date and str(snapshot.get("as_of_date")) != latest_date:
                         continue
                     forecasts.append(
                         self._market_payload_from_snapshot(
@@ -813,22 +816,28 @@ class SupabaseForecastEngine:
                         )
                     )
                     covered_tickers.add(str(snapshot.get("ticker")))
-            for row in universe:
-                ticker = str(row["ticker"])
-                if ticker in covered_tickers:
-                    continue
-                try:
-                    forecasts.append(
-                        self.build_ticker_forecast(
-                            ticker=ticker,
-                            horizon_days=horizon_days,
-                            window_size=window_size,
-                            prefer_snapshot=False,
-                            forecast_start_date=forecast_start_date,
+            if not forecasts:
+                fallback_limit = min(
+                    len(universe),
+                    max(max(int(top_n), 1) * 3, 20),
+                    60,
+                )
+                for row in universe[:fallback_limit]:
+                    ticker = str(row["ticker"])
+                    if ticker in covered_tickers:
+                        continue
+                    try:
+                        forecasts.append(
+                            self.build_ticker_forecast(
+                                ticker=ticker,
+                                horizon_days=horizon_days,
+                                window_size=window_size,
+                                prefer_snapshot=False,
+                                forecast_start_date=forecast_start_date,
+                            )
                         )
-                    )
-                except ArtifactValidationError:
-                    continue
+                    except ArtifactValidationError:
+                        continue
             self._market_forecast_cache[cache_key] = [forecast.copy() for forecast in forecasts]
         if not forecasts:
             raise ArtifactValidationError("No Supabase tickers have enough market history")

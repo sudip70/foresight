@@ -1,5 +1,6 @@
 const DEPLOYED_API_BASE = "https://stockify-backend-adc6.onrender.com";
 const LOCAL_API_BASE = "http://localhost:8000";
+const API_TIMEOUT_MS = 45_000;
 
 function normalizeApiBase(value) {
   return String(value || "").trim().replace(/\/$/, "");
@@ -628,14 +629,27 @@ async function callSectionApi(section, path, options = {}) {
   if (state.controllers[section]) {
     state.controllers[section].abort();
   }
+  const { timeoutMs: requestTimeoutMs, ...requestOptions } = options;
   const controller = new AbortController();
+  let timedOut = false;
+  const timeoutMs = Number(requestTimeoutMs || API_TIMEOUT_MS);
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   state.controllers[section] = controller;
   try {
     return await callApi(path, {
-      ...options,
+      ...requestOptions,
       signal: controller.signal,
     });
+  } catch (error) {
+    if (timedOut && isAbort(error)) {
+      throw new Error("Request timed out. Render may still be waking up; try again in a minute.");
+    }
+    throw error;
   } finally {
+    window.clearTimeout(timeoutId);
     if (state.controllers[section] === controller) {
       delete state.controllers[section];
     }
@@ -2071,8 +2085,9 @@ async function refreshActiveView({ force = false } = {}) {
     await ensureUniverse();
     await runSimulation();
     state.loaded.simulator = true;
+  } else if (tabName === "project" && !state.loaded.diagnostics) {
+    await refreshDiagnosticsInBackground();
   }
-  refreshDiagnosticsInBackground();
 }
 
 async function refreshDashboard() {
