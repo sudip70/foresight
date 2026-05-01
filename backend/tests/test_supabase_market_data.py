@@ -329,6 +329,48 @@ def test_market_forecast_ignores_stale_snapshots_and_recomputes_from_latest_hist
     ]
 
 
+def test_market_forecast_fills_tickers_missing_from_partial_snapshot_cache():
+    repository = InMemoryMarketDataRepository()
+    repository.upsert_universe(
+        [
+            *_assets(),
+            {
+                "ticker": "CCC",
+                "asset_class": "crypto",
+                "display_name": "CCC Crypto",
+                "provider_symbol": "CCC-USD",
+                "exchange": "CRYPTO",
+                "currency": "USD",
+                "sector": "Crypto",
+                "industry": "Digital Asset",
+                "country": "Global",
+                "benchmark_group": "test",
+                "min_history_days": 30,
+                "active": True,
+            },
+        ]
+    )
+    repository.upsert_ohlcv(_ohlcv_rows("AAA"))
+    repository.upsert_ohlcv(_ohlcv_rows("BBB"))
+    repository.upsert_ohlcv(_ohlcv_rows("CCC"))
+    engine = SupabaseForecastEngine(repository, resettable_settings())
+    crypto_forecast = engine.build_ticker_forecast(
+        ticker="CCC",
+        horizon_days=30,
+        window_size=20,
+        prefer_snapshot=False,
+    )
+    repository.upsert_forecasts([engine.forecast_snapshot_row(crypto_forecast)])
+
+    market = engine.run_market_forecast(horizon_days=30, window_size=20, risk=0.5, top_n=10)
+
+    by_ticker = {row["ticker"]: row for row in market["ranked_tickers"]}
+    assert set(by_ticker) == {"AAA", "BBB", "CCC"}
+    assert by_ticker["CCC"]["source"] == "supabase_forecast_snapshot"
+    assert by_ticker["AAA"]["source"] == "supabase_ohlcv"
+    assert by_ticker["BBB"]["source"] == "supabase_ohlcv"
+
+
 def test_refresh_job_logs_partial_failure_and_precomputes_forecasts():
     repository = InMemoryMarketDataRepository()
     report = run_refresh(
