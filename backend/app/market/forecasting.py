@@ -791,6 +791,7 @@ class SupabaseForecastEngine:
         if not forecasts:
             universe = self.repository.list_universe()
             active_metadata = {row["ticker"]: row for row in universe}
+            covered_tickers: set[str] = set()
             snapshots = self.repository.list_latest_forecast_snapshots(
                 horizon_days=horizon_days,
                 window_size=window_size,
@@ -811,20 +812,23 @@ class SupabaseForecastEngine:
                             forecast_start_date=forecast_start_date,
                         )
                     )
-            if not forecasts:
-                for row in universe:
-                    try:
-                        forecasts.append(
-                            self.build_ticker_forecast(
-                                ticker=row["ticker"],
-                                horizon_days=horizon_days,
-                                window_size=window_size,
-                                prefer_snapshot=False,
-                                forecast_start_date=forecast_start_date,
-                            )
+                    covered_tickers.add(str(snapshot.get("ticker")))
+            for row in universe:
+                ticker = str(row["ticker"])
+                if ticker in covered_tickers:
+                    continue
+                try:
+                    forecasts.append(
+                        self.build_ticker_forecast(
+                            ticker=ticker,
+                            horizon_days=horizon_days,
+                            window_size=window_size,
+                            prefer_snapshot=False,
+                            forecast_start_date=forecast_start_date,
                         )
-                    except ArtifactValidationError:
-                        continue
+                    )
+                except ArtifactValidationError:
+                    continue
             self._market_forecast_cache[cache_key] = [forecast.copy() for forecast in forecasts]
         if not forecasts:
             raise ArtifactValidationError("No Supabase tickers have enough market history")

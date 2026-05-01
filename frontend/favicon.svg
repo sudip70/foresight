@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Foresight favicon">
+  <defs>
+    <linearGradient id="bg" x1="10" y1="8" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#20242b" />
+      <stop offset="1" stop-color="#06080b" />
+    </linearGradient>
+    <linearGradient id="signal" x1="12" y1="46" x2="52" y2="16" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#16c784" />
+      <stop offset="1" stop-color="#20e0b2" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#bg)" />
+  <rect x="7" y="7" width="50" height="50" rx="11" fill="none" stroke="#2c333d" stroke-width="2" />
+  <path
+    d="M14 42 23 33 31 37 43 23 50 28"
+    fill="none"
+    stroke="url(#signal)"
+    stroke-width="5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <circle cx="43" cy="23" r="8" fill="none" stroke="#8cc8ff" stroke-width="4" />
+  <path d="M49 29 55 35" fill="none" stroke="#8cc8ff" stroke-width="4" stroke-linecap="round" />
+  <circle cx="14" cy="42" r="3" fill="#16c784" />
+  <circle cx="23" cy="33" r="3" fill="#16c784" />
+  <circle cx="31" cy="37" r="3" fill="#16c784" />
+</svg>
