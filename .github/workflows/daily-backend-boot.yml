@@ -1,0 +1,22 @@
+name: Daily backend boot
+
+on:
+  schedule:
+    - cron: "0 12 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: daily-backend-boot
+  cancel-in-progress: true
+
+jobs:
+  boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Boot backend
+        env:
+          FORESIGHT_BACKEND_BOOT_URL: ${{ vars.FORESIGHT_BACKEND_BOOT_URL || 'https://foresight-backend-a5qx.onrender.com' }}
+        run: scripts/boot_backend_daily.sh

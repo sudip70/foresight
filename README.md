@@ -67,6 +67,8 @@ The repository includes `.github/workflows/gh-pages.yml`, which deploys only the
 
 When the app is served from GitHub Pages or another non-local hostname, the frontend defaults to the Foresight Render backend at `https://foresight-backend-a5qx.onrender.com`. Local development still defaults to `http://localhost:8000`. You can override the backend from the in-app Settings panel or by opening the page with `?apiBase=https://your-backend.example.com`.
 
+Browsers that previously saved the retired Stockify backend URL are automatically migrated to the current Foresight backend the next time the frontend loads.
+
 If Pages is accidentally configured to deploy from the `main` branch root, the root `index.html` redirects visitors to `frontend/`, but the GitHub Actions deployment is the preferred setup.
 
 ## Artifact Repair
@@ -130,6 +132,8 @@ scripts/refresh_supabase_daily.sh
 The job is idempotent: it upserts `asset_universe`, `market_ohlcv_daily`, `asset_profile_snapshots`, `macro_observations`, `market_index_snapshots`, `forecast_snapshots`, and refresh run logs. It precomputes default forecast horizons of 30, 90, 180, and 300 days.
 
 The Render Blueprint only creates the free `foresight-backend` web service. Daily Supabase refreshes run from GitHub Actions via `.github/workflows/daily-market-refresh.yml` every day at 23:30 UTC, and the workflow can still be run manually with either incremental or full mode. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as GitHub repository Actions secrets so the scheduled workflow can write to Supabase.
+
+The backend boot workflow in `.github/workflows/daily-backend-boot.yml` runs every day at 12:00 UTC and calls `scripts/boot_backend_daily.sh`, which checks `/api/health` with retries so the Render service wakes up at least once a day. Set the GitHub repository variable `FORESIGHT_BACKEND_BOOT_URL` if the deployed backend URL changes.
 
 The wrapper script supports environment overrides: `FORESIGHT_REFRESH_MODE`, `FORESIGHT_REFRESH_LOOKBACK_DAYS`, `FORESIGHT_REFRESH_FRESHNESS_DAYS`, `FORESIGHT_FORECAST_HORIZONS`, `FORESIGHT_FORECAST_WINDOW_SIZE`, `FORESIGHT_REFRESH_START_DATE`, `FORESIGHT_REFRESH_END_DATE`, and `FORESIGHT_REFRESH_DRY_RUN=true`. Legacy `STOCKIFY_*` env vars are still read as fallbacks during the rename.
 

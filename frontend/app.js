@@ -1,9 +1,17 @@
 const DEPLOYED_API_BASE = "https://foresight-backend-a5qx.onrender.com";
 const LOCAL_API_BASE = "http://localhost:8000";
 const API_TIMEOUT_MS = 45_000;
+const RETIRED_API_BASES = new Set([
+  "https://stockify-backend-adc6.onrender.com",
+]);
 
 function normalizeApiBase(value) {
   return String(value || "").trim().replace(/\/$/, "");
+}
+
+function canonicalApiBase(value) {
+  const normalized = normalizeApiBase(value);
+  return RETIRED_API_BASES.has(normalized) ? DEPLOYED_API_BASE : normalized;
 }
 
 function queryApiBase() {
@@ -33,9 +41,12 @@ function defaultApiBase() {
 
 function initialApiBase() {
   const explicitApiBase = queryApiBase() || window.FORESIGHT_API_BASE;
-  if (explicitApiBase) return normalizeApiBase(explicitApiBase);
+  if (explicitApiBase) return canonicalApiBase(explicitApiBase);
 
-  const savedApiBase = normalizeApiBase(localStorage.getItem("foresight-api-base"));
+  const savedApiBase = canonicalApiBase(localStorage.getItem("foresight-api-base"));
+  if (savedApiBase) {
+    localStorage.setItem("foresight-api-base", savedApiBase);
+  }
   const host = window.location?.hostname || "";
   if (savedApiBase && (isLocalHost(host) || !isLocalApiBase(savedApiBase))) {
     return savedApiBase;
@@ -2274,7 +2285,7 @@ elements.themeModeToggle?.addEventListener("click", (e) => {
 });
 
 elements.saveApiBase.addEventListener("click", async () => {
-  state.apiBase = normalizeApiBase(elements.apiBase.value) || defaultApiBase();
+  state.apiBase = canonicalApiBase(elements.apiBase.value) || defaultApiBase();
   elements.apiBase.value = state.apiBase;
   localStorage.setItem("foresight-api-base", state.apiBase);
   state.universe = null;
