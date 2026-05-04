@@ -1137,6 +1137,10 @@ button:hover {
   color: var(--danger);
 }
 
+.pending {
+  color: var(--warning-ink);
+}
+
 .sparkline {
   align-self: end;
   width: 104px;
