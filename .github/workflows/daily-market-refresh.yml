@@ -1,8 +1,11 @@
-name: Daily Supabase market refresh
+name: Market-hours Supabase refresh
 
 on:
   schedule:
-    - cron: "30 23 * * *"
+    # GitHub schedules use UTC. During the current EDT market season these run
+    # at 9:35 AM and 4:15 PM America/Toronto, shortly after open and close.
+    - cron: "35 13 * * 1-5"
+    - cron: "15 20 * * 1-5"
   workflow_dispatch:
     inputs:
       mode:

@@ -123,7 +123,7 @@ source .venv/bin/activate
 python offline/supabase_refresh.py --mode full
 ```
 
-4. For daily updates, run the incremental job after market close:
+4. For scheduled updates, run the incremental job after market open and close:
 
 ```bash
 scripts/refresh_supabase_daily.sh
@@ -131,7 +131,7 @@ scripts/refresh_supabase_daily.sh
 
 The job is idempotent: it upserts `asset_universe`, `market_ohlcv_daily`, `asset_profile_snapshots`, `macro_observations`, `market_index_snapshots`, `forecast_snapshots`, and refresh run logs. It precomputes default forecast horizons of 30, 90, 180, and 300 days.
 
-The Render Blueprint only creates the free `foresight-backend` web service. Daily Supabase refreshes run from GitHub Actions via `.github/workflows/daily-market-refresh.yml` every day at 23:30 UTC, and the workflow can still be run manually with either incremental or full mode. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as GitHub repository Actions secrets so the scheduled workflow can write to Supabase.
+The Render Blueprint only creates the free `foresight-backend` web service. Supabase refreshes run from GitHub Actions via `.github/workflows/daily-market-refresh.yml` on weekdays at 13:35 UTC and 20:15 UTC, matching 9:35 AM and 4:15 PM America/Toronto during the current EDT market season. This gives Monday users a fresh morning refresh instead of waiting for an after-close job. The workflow can still be run manually with either incremental or full mode. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as GitHub repository Actions secrets so the scheduled workflow can write to Supabase.
 
 The backend boot workflow in `.github/workflows/daily-backend-boot.yml` runs every day at 12:00 UTC and calls `scripts/boot_backend_daily.sh`, which checks `/api/health` with retries so the Render service wakes up at least once a day. Set the GitHub repository variable `FORESIGHT_BACKEND_BOOT_URL` if the deployed backend URL changes.
 

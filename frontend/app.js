@@ -1744,6 +1744,66 @@ function latestDataSubtitle(refresh = state.refreshStatus || {}) {
   return "Latest available market date";
 }
 
+function modelStatusDisplay(health = {}) {
+  const artifactEngine = health.artifact_engine || {};
+  const status = String(artifactEngine.status || "").toLowerCase();
+  const error = String(artifactEngine.error || health.error || "");
+  const lazyEnabled = artifactEngine.lazy_enabled === true;
+
+  if (health.ready === false) {
+    return {
+      label: "Degraded",
+      className: "negative",
+      detail: error || "Backend health check is degraded.",
+    };
+  }
+
+  if (lazyEnabled) {
+    if (status === "ready") {
+      return {
+        label: "Healthy",
+        className: "positive",
+        detail: "Artifact engine ready; backtests and RL diagnostics are available.",
+      };
+    }
+    if (status === "loading") {
+      return {
+        label: "Lazy loading",
+        className: "pending",
+        detail: "Market APIs are ready; the artifact engine is warming up in the background.",
+      };
+    }
+    if (status === "not_started" || !status) {
+      return {
+        label: "Lazy loading",
+        className: "pending",
+        detail: "Market APIs are ready; the artifact engine loads automatically on first backtest or diagnostics request.",
+      };
+    }
+    if (status === "error") {
+      return {
+        label: "Partial",
+        className: "negative",
+        detail: error || "Market APIs are ready, but the artifact engine failed to load.",
+      };
+    }
+  }
+
+  if (/artifact engine disabled|FORESIGHT_LOAD_ARTIFACT_ENGINE=false/i.test(error)) {
+    return {
+      label: "Limited",
+      className: "pending",
+      detail: "Market APIs are healthy. Deploy the lazy-loading backend update to enable backtests and RL diagnostics.",
+    };
+  }
+
+  return {
+    label: "Healthy",
+    className: "positive",
+    detail: error || "All systems operational.",
+  };
+}
+
 function renderDataHealthCards() {
   if (!elements.dataHealthCards) return;
   const health = state.health || {};
@@ -1760,12 +1820,13 @@ function renderDataHealthCards() {
     : `${formatNumber(sharpeRatio, 2)} Sharpe ratio`;
   const latestSubtitle = latestDataSubtitle(refresh);
   const hasLiveIndexDate = Boolean(state.marketIndexAsOf || refresh.market_index_refresh?.as_of_date);
+  const modelStatus = modelStatusDisplay(health);
 
   elements.dataHealthCards.innerHTML = [
     `<article class="health-card">
       <span>Model status</span>
-      <strong class="${health.ready === false ? "negative" : "positive"}">${health.ready === false ? "Degraded" : "Healthy"}</strong>
-      <small>${health.error || "All systems operational"}</small>
+      <strong class="${modelStatus.className}">${escapeHtml(modelStatus.label)}</strong>
+      <small>${escapeHtml(modelStatus.detail)}</small>
     </article>`,
     `<article class="health-card">
       <span>Data freshness</span>
@@ -1798,7 +1859,7 @@ function renderProjectStory() {
   const explainability = models.explainability?.method || "surrogate explainability";
   const modelSurface = models.feature_groups
     ? `model metadata, ${formatInteger(featureGroups)} feature groups, forecasts, simulations, backtests, and ${explainability}`
-    : "Supabase-backed forecasts, portfolio simulations, refresh diagnostics, and optional artifact endpoints for local RL workflows";
+    : "Supabase-backed forecasts, portfolio simulations, refresh diagnostics, and lazily loaded artifact endpoints for RL workflows";
   const statusLabel = state.health
     ? health.ready === false
       ? "Degraded"
@@ -1867,12 +1928,26 @@ async function refreshDiagnostics() {
   }
   const [healthResult, modelsResult, refreshResult] = await Promise.allSettled([
     callSectionApi("health", "/api/health"),
-    callSectionApi("models", "/api/models"),
+    callArtifactSectionApi("models", "/api/models", { artifactAttempts: 4 }),
     callSectionApi("refreshStatus", "/api/data/refresh/status"),
   ]);
+  const healthValue =
+    healthResult.status === "fulfilled" && modelsResult.status === "fulfilled" && healthResult.value?.artifact_engine?.lazy_enabled
+      ? {
+          ...healthResult.value,
+          error: healthResult.value.ready === false ? healthResult.value.error : null,
+          artifact_engine: {
+            ...healthResult.value.artifact_engine,
+            status: "ready",
+            error: null,
+          },
+        }
+      : healthResult.status === "fulfilled"
+        ? healthResult.value
+        : null;
   elements.healthBlock.textContent =
-    healthResult.status === "fulfilled"
-      ? JSON.stringify(healthResult.value, null, 2)
+    healthValue
+      ? JSON.stringify(healthValue, null, 2)
       : `Health unavailable: ${healthResult.reason.message}`;
   elements.modelsBlock.textContent =
     modelsResult.status === "fulfilled"
@@ -1883,7 +1958,7 @@ async function refreshDiagnostics() {
       ? JSON.stringify(refreshResult.value, null, 2)
       : `Refresh status unavailable: ${refreshResult.reason.message}`;
   if (elements.dataHealthCards) {
-    state.health = healthResult.status === "fulfilled" ? healthResult.value : null;
+    state.health = healthValue;
     state.models = modelsResult.status === "fulfilled" ? modelsResult.value : null;
     state.refreshStatus = refreshResult.status === "fulfilled" ? refreshResult.value : null;
     renderDataHealthCards();
