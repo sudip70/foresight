@@ -611,6 +611,11 @@ function setError(target, message) {
   target.innerHTML = `<article class="error-banner">${message}</article>`;
 }
 
+function setBackendEmptyState(visible) {
+  const emptyState = document.getElementById("marketEmptyState");
+  emptyState?.classList.toggle("is-visible", Boolean(visible));
+}
+
 async function callApi(path, options = {}) {
   const headers = options.body ? { "Content-Type": "application/json" } : {};
   const response = await fetch(`${state.apiBase}${path}`, {
@@ -629,7 +634,10 @@ async function callApi(path, options = {}) {
     } catch {
       message = payload;
     }
-    throw new Error(message || `Request failed: ${response.status}`);
+    const error = new Error(message || `Request failed: ${response.status}`);
+    error.status = response.status;
+    error.retryAfter = Number(response.headers.get("Retry-After") || 0);
+    throw error;
   }
   return response.json();
 }
@@ -667,6 +675,39 @@ async function callSectionApi(section, path, options = {}) {
 
 function isAbort(error) {
   return error && error.name === "AbortError";
+}
+
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isArtifactEngineLoadingError(error) {
+  return error?.status === 503 && /artifact engine|foresight engine is loading/i.test(String(error.message || ""));
+}
+
+async function callArtifactSectionApi(section, path, options = {}) {
+  const attempts = Number(options.artifactAttempts || 8);
+  const { artifactAttempts, ...requestOptions } = options;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await callSectionApi(section, path, requestOptions);
+    } catch (error) {
+      if (!isArtifactEngineLoadingError(error) || attempt === attempts - 1) {
+        throw error;
+      }
+      if (attempt === 0) {
+        showToast("Artifact engine is warming up. Retrying automatically.", "info");
+      }
+      const retryAfter = Number(error.retryAfter || 0);
+      await wait(Math.max(4000, Math.min(15000, retryAfter * 1000 || 6000)));
+    }
+  }
+  throw new Error("Artifact engine did not finish loading in time.");
+}
+
+function isBackendConnectionError(error) {
+  const message = String(error?.message || error || "");
+  return /failed to fetch|networkerror|load failed|request timed out|backend is not connected/i.test(message);
 }
 
 function selectedHorizonDays() {
@@ -1853,6 +1894,7 @@ async function loadUniverse() {
   state.universe = await callSectionApi("universe", "/api/universe");
   renderUniverse(state.universe);
   renderDataHealthCards();
+  setBackendEmptyState(false);
 }
 
 async function ensureUniverse() {
@@ -1929,6 +1971,7 @@ async function runMarketForecast() {
       throw marketResult.reason;
     }
     renderMarket(marketResult.value);
+    setBackendEmptyState(false);
   } catch (error) {
     if (isAbort(error)) return;
     setError(elements.marketTable, `Market forecast unavailable: ${error.message}`);
@@ -1969,6 +2012,7 @@ async function runTickerForecast(ticker = elements.tickerSelect.value) {
     elements.tickerSelect.value = result.ticker;
     renderTickerForecast(result);
     renderTickerProfile(profile, result);
+    setBackendEmptyState(false);
     updateProgress("forecast");
   } catch (error) {
     if (isAbort(error)) return;
@@ -2000,6 +2044,7 @@ async function runSimulation() {
       }),
     });
     renderSimulation(result);
+    setBackendEmptyState(false);
     updateProgress("simulation");
   } catch (error) {
     if (isAbort(error)) return;
@@ -2013,7 +2058,7 @@ async function runSimulation() {
 async function runRlAllocation() {
   setLoading(elements.rlSummary);
   try {
-    const result = await callSectionApi("rlAllocation", "/api/inference", {
+    const result = await callArtifactSectionApi("rlAllocation", "/api/inference", {
       method: "POST",
       body: JSON.stringify(allocationPayload()),
     });
@@ -2028,7 +2073,7 @@ async function runRlAllocation() {
 async function runBacktest() {
   setLoading(elements.backtestSummary);
   try {
-    const result = await callSectionApi("backtest", "/api/backtests", {
+    const result = await callArtifactSectionApi("backtest", "/api/backtests", {
       method: "POST",
       body: JSON.stringify({
         initial_amount: Number(elements.amount.value),
@@ -2104,7 +2149,13 @@ async function refreshActiveView({ force = false } = {}) {
 async function refreshDashboard() {
   elements.apiStatus.textContent = "Refreshing current view...";
   elements.apiStatus.className = "muted";
-  await refreshActiveView({ force: true });
+  setBackendEmptyState(false);
+  try {
+    await refreshActiveView({ force: true });
+  } catch (error) {
+    setBackendEmptyState(isBackendConnectionError(error));
+    throw error;
+  }
   elements.apiStatus.textContent = "Backend connected.";
   elements.apiStatus.className = "status-good";
 }
@@ -2119,9 +2170,7 @@ async function probeBackend() {
     }
     state.health = health;
     renderDataHealthCards();
-    await refreshActiveView({ force: true });
-    elements.apiStatus.textContent = "Backend connected.";
-    elements.apiStatus.className = "status-good";
+    setBackendEmptyState(false);
   } catch (error) {
     if (isAbort(error)) return;
     elements.apiStatus.textContent = `Set your backend URL, then click Use Backend. ${error.message}`;
@@ -2134,8 +2183,19 @@ async function probeBackend() {
     }
     setError(elements.tickerMetrics, "Backend is not connected.");
     setError(elements.simulationSummary, "Backend is not connected.");
-    const emptyState = document.getElementById("marketEmptyState");
-    if (emptyState) emptyState.classList.add("is-visible");
+    setBackendEmptyState(true);
+    return;
+  }
+
+  try {
+    await refreshActiveView({ force: true });
+    elements.apiStatus.textContent = "Backend connected.";
+    elements.apiStatus.className = "status-good";
+  } catch (error) {
+    if (isAbort(error)) return;
+    setBackendEmptyState(false);
+    elements.apiStatus.textContent = `Backend connected, but dashboard refresh failed: ${error.message}`;
+    elements.apiStatus.className = "status-bad";
   }
 }
 

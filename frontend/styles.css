@@ -2606,6 +2606,82 @@ body:not(.learn-mode) .learn-panel {
     display: grid;
   }
 
+  .section-head,
+  .section-head.with-actions {
+    gap: 16px;
+  }
+
+  .surface,
+  .metric,
+  .index-card,
+  .scenario-tile,
+  .health-card,
+  .lesson-grid > .lesson-card,
+  .lesson-stack > .lesson-card,
+  .risk-checklist {
+    padding: 18px;
+  }
+
+  .ticker-actions,
+  .simulator-actions {
+    width: 100%;
+    justify-content: stretch;
+    justify-items: stretch;
+  }
+
+  .ticker-actions {
+    gap: 12px;
+  }
+
+  .ticker-actions select,
+  .ticker-actions button,
+  .forecast-horizon-field {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .forecast-horizon-field {
+    grid-template-columns: minmax(0, 1fr) minmax(74px, 96px);
+  }
+
+  .simulator-actions {
+    grid-template-columns: minmax(0, 1fr) 48px;
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  .simulator-actions > button,
+  .simulator-actions .selection-menu,
+  .simulator-actions .icon-button {
+    width: 100%;
+  }
+
+  .selection-menu .settings-panel {
+    position: fixed;
+    top: 112px;
+    right: 16px;
+    left: 16px;
+    width: auto;
+    max-height: calc(100dvh - 208px);
+    overflow-y: auto;
+  }
+
+  .market-index-controls {
+    width: 100%;
+    margin-left: 0;
+    align-items: stretch;
+  }
+
+  .market-index-controls select,
+  .market-index-controls .range-tabs {
+    width: 100%;
+  }
+
+  .range-tabs {
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
   .amount-field,
   .horizon-field,
   .risk-field,
@@ -2622,6 +2698,146 @@ body:not(.learn-mode) .learn-panel {
   .metric-grid.compact,
   .diagnostics-grid {
     grid-template-columns: 1fr;
+  }
+
+  .data-table {
+    gap: 10px;
+  }
+
+  .data-table .table-head {
+    display: none;
+  }
+
+  .data-table .row {
+    border-bottom: 0;
+  }
+
+  .data-table .asset-row:not(.table-head),
+  .data-table .trade-row:not(.table-head),
+  .data-table .top-row:not(.table-head),
+  .data-table .market-row:not(.table-head) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px 16px;
+    min-height: 0;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-soft);
+  }
+
+  .data-table .asset-row:not(.table-head) > strong,
+  .data-table .trade-row:not(.table-head) > strong,
+  .data-table .top-row:not(.table-head) > strong,
+  .data-table .market-row:not(.table-head) > strong {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+    font-size: 1rem;
+  }
+
+  .data-table .asset-row:not(.table-head) > span:nth-child(2),
+  .data-table .top-row:not(.table-head) > span:nth-child(2),
+  .data-table .market-row:not(.table-head) > span:nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    width: fit-content;
+    padding: 3px 9px;
+    border-radius: 6px;
+    background: var(--neutral-pill-bg);
+    color: var(--neutral-pill-ink);
+    font-size: 0.78rem;
+    font-weight: 750;
+    text-transform: capitalize;
+  }
+
+  .data-table .trade-row:not(.table-head) > .action-pill {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+  }
+
+  .data-table .asset-row:not(.table-head) > span:nth-child(3),
+  .data-table .asset-row:not(.table-head) > span:nth-child(4),
+  .data-table .trade-row:not(.table-head) > span:nth-child(3),
+  .data-table .trade-row:not(.table-head) > span:nth-child(4),
+  .data-table .top-row:not(.table-head) > span:nth-child(3),
+  .data-table .top-row:not(.table-head) > span:nth-child(4),
+  .data-table .market-row:not(.table-head) > span:nth-child(3),
+  .data-table .market-row:not(.table-head) > span:nth-child(4),
+  .data-table .market-row:not(.table-head) > span:nth-child(5),
+  .data-table .market-row:not(.table-head) > span:nth-child(6) {
+    display: grid;
+    gap: 3px;
+    color: var(--ink);
+    font-weight: 650;
+  }
+
+  .data-table .asset-row:not(.table-head) > span:nth-child(4),
+  .data-table .trade-row:not(.table-head) > span:nth-child(4),
+  .data-table .top-row:not(.table-head) > span:nth-child(4),
+  .data-table .market-row:not(.table-head) > span:nth-child(4),
+  .data-table .market-row:not(.table-head) > span:nth-child(6) {
+    justify-items: end;
+    text-align: right;
+  }
+
+  .data-table .asset-row:not(.table-head) > span:nth-child(3)::before,
+  .data-table .asset-row:not(.table-head) > span:nth-child(4)::before,
+  .data-table .trade-row:not(.table-head) > span:nth-child(3)::before,
+  .data-table .trade-row:not(.table-head) > span:nth-child(4)::before,
+  .data-table .top-row:not(.table-head) > span:nth-child(3)::before,
+  .data-table .top-row:not(.table-head) > span:nth-child(4)::before,
+  .data-table .market-row:not(.table-head) > span:nth-child(3)::before,
+  .data-table .market-row:not(.table-head) > span:nth-child(4)::before,
+  .data-table .market-row:not(.table-head) > span:nth-child(5)::before,
+  .data-table .market-row:not(.table-head) > span:nth-child(6)::before {
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .data-table .asset-row:not(.table-head) > span:nth-child(3)::before,
+  .data-table .trade-row:not(.table-head) > span:nth-child(3)::before {
+    content: "Weight";
+  }
+
+  .data-table .asset-row:not(.table-head) > span:nth-child(4)::before {
+    content: "Value";
+  }
+
+  .data-table .trade-row:not(.table-head) > span:nth-child(4)::before {
+    content: "Amount";
+  }
+
+  .data-table .top-row:not(.table-head) > span:nth-child(3)::before {
+    content: "Base return";
+  }
+
+  .data-table .top-row:not(.table-head) > span:nth-child(4)::before {
+    content: "Confidence";
+  }
+
+  .data-table .market-row:not(.table-head) > span:nth-child(3)::before {
+    content: "Base";
+  }
+
+  .data-table .market-row:not(.table-head) > span:nth-child(4)::before {
+    content: "Bear";
+  }
+
+  .data-table .market-row:not(.table-head) > span:nth-child(5)::before {
+    content: "Bull";
+  }
+
+  .data-table .market-row:not(.table-head) > span:nth-child(6)::before {
+    content: "Confidence";
+  }
+
+  .data-table .market-row:not(.table-head) > button {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 
   .architecture-node {
@@ -2641,6 +2857,20 @@ body:not(.learn-mode) .learn-panel {
   .sparkline { width: 100%; }
   .chart-frame { height: 330px; }
   .market-index-summary.metric-grid.compact { grid-template-columns: 1fr; }
+  .metric-grid { grid-template-columns: 1fr; }
+  .metric strong,
+  .scenario-tile strong,
+  .health-card strong {
+    overflow-wrap: anywhere;
+  }
+
+  .mobile-nav-item {
+    flex: 1;
+    min-width: 0;
+    padding-right: 4px;
+    padding-left: 4px;
+  }
+
   .project-stats,
   .about-links {
     grid-template-columns: 1fr;
@@ -2671,6 +2901,6 @@ body:not(.learn-mode) .learn-panel {
     letter-spacing: 0;
   }
 
-  .toast-container { top: 16px; bottom: auto; right: 12px; left: 12px; flex-direction: column; }
+  .toast-container { top: auto; bottom: calc(64px + 12px + env(safe-area-inset-bottom)); right: 12px; left: 12px; flex-direction: column; }
   .toast { max-width: 100%; }
 }

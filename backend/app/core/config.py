@@ -34,6 +34,7 @@ class Settings:
     supabase_service_role_key: str
     require_supabase: bool
     load_artifact_engine: bool
+    lazy_load_artifact_engine: bool
 
 
 _settings: Settings | None = None
@@ -92,6 +93,7 @@ def get_settings() -> Settings:
         supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
         require_supabase=_env_bool("REQUIRE_SUPABASE", "false"),
         load_artifact_engine=_env_bool("LOAD_ARTIFACT_ENGINE", "true"),
+        lazy_load_artifact_engine=_env_bool("LAZY_LOAD_ARTIFACT_ENGINE", "false"),
     )
     return _settings
 

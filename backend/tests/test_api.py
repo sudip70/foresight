@@ -1,4 +1,5 @@
 from datetime import date
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -188,6 +189,44 @@ def test_backtests_endpoint_returns_curves_and_metrics(client):
     assert len(payload["equity_curve"]) == 9
     assert len(payload["drawdown_curve"]) == 9
     assert payload["trade_log"]
+
+
+def test_lazy_artifact_engine_loads_backtests_in_background(tmp_path, monkeypatch):
+    artifact_root = build_fixture_artifact_tree(tmp_path)
+    dataset_root = tmp_path / "datasets"
+    dataset_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_LOAD_ARTIFACT_ENGINE", "false")
+    monkeypatch.setenv("FORESIGHT_LAZY_LOAD_ARTIFACT_ENGINE", "true")
+    monkeypatch.setenv("FORESIGHT_DEFAULT_BACKTEST_STEPS", "8")
+    reset_settings()
+    reset_engine()
+
+    with TestClient(create_app()) as test_client:
+        health = test_client.get("/api/health")
+        assert health.status_code == 200
+        assert health.json()["artifact_engine"]["lazy_enabled"] is True
+
+        response = None
+        for _ in range(20):
+            response = test_client.post(
+                "/api/backtests",
+                json={"initial_amount": 10000, "risk": 0.5, "window_size": 5, "max_steps": 8},
+            )
+            if response.status_code == 200:
+                break
+            assert response.status_code == 503
+            assert "loading" in response.json()["detail"].lower()
+            time.sleep(0.05)
+
+        assert response is not None
+        assert response.status_code == 200
+        assert response.json()["summary_metrics"]["ending_value"] > 0
+
+    reset_settings()
+    reset_engine()
 
 
 def test_backtest_trade_log_matches_reported_turnover(client):
