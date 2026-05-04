@@ -15,6 +15,7 @@ class HealthResponse(BaseModel):
     ready: bool | None = None
     error: str | None = None
     market_data: dict[str, Any] | None = None
+    artifact_engine: dict[str, Any] | None = None
 
 
 class ModelsResponse(BaseModel):

@@ -3,7 +3,7 @@ services:
     name: foresight-backend
     runtime: python
     plan: free
-    buildCommand: python3.11 -m pip install --upgrade pip && python3.11 -m pip install -r requirements-render.txt
+    buildCommand: python3.11 -m pip install --upgrade pip && python3.11 -m pip install -r requirements.txt
     startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     envVars:
@@ -17,6 +17,8 @@ services:
         value: "true"
       - key: FORESIGHT_LOAD_ARTIFACT_ENGINE
         value: "false"
+      - key: FORESIGHT_LAZY_LOAD_ARTIFACT_ENGINE
+        value: "true"
       - key: FORESIGHT_MARKET_DATA_PROVIDER
         value: yfinance
       - key: FORESIGHT_MARKET_INDEX_AUTO_REFRESH

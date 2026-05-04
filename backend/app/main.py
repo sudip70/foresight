@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from functools import lru_cache
 import json
+import threading
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -62,6 +63,73 @@ def _market_health_payload(app: FastAPI) -> dict | None:
     return repository.health_payload()
 
 
+def _artifact_engine_status(app: FastAPI) -> dict:
+    settings = get_settings()
+    engine = getattr(app.state, "engine", None)
+    loading = bool(getattr(app.state, "engine_loading", False))
+    error = getattr(app.state, "engine_error", None)
+    if engine is not None:
+        status = "ready"
+    elif loading:
+        status = "loading"
+    elif settings.lazy_load_artifact_engine:
+        status = "error" if error else "not_started"
+    elif settings.load_artifact_engine:
+        status = "error" if error else "not_loaded"
+    else:
+        status = "disabled"
+    return {
+        "status": status,
+        "startup_enabled": settings.load_artifact_engine,
+        "lazy_enabled": settings.lazy_load_artifact_engine,
+        "error": str(error) if error and status in {"error", "disabled"} else None,
+    }
+
+
+def _start_artifact_engine_background_load(app: FastAPI) -> bool:
+    settings = get_settings()
+    if not settings.lazy_load_artifact_engine:
+        return False
+    if getattr(app.state, "engine", None) is not None:
+        return False
+
+    lock = getattr(app.state, "engine_lock", None)
+    if lock is None:
+        return False
+
+    with lock:
+        if getattr(app.state, "engine", None) is not None:
+            return False
+        if getattr(app.state, "engine_loading", False):
+            return False
+
+        app.state.engine_loading = True
+        app.state.engine_error = "Artifact engine is loading in background"
+
+        def load() -> None:
+            try:
+                engine = _load_engine()
+            except Exception as exc:  # pragma: no cover - background defensive path
+                with lock:
+                    app.state.engine = None
+                    app.state.engine_error = exc
+                    app.state.engine_loading = False
+            else:
+                with lock:
+                    app.state.engine = engine
+                    app.state.engine_error = None
+                    app.state.engine_loading = False
+
+        thread = threading.Thread(
+            target=load,
+            name="foresight-artifact-engine-loader",
+            daemon=True,
+        )
+        app.state.engine_loader_thread = thread
+        thread.start()
+        return True
+
+
 def _degraded_health_payload(app: FastAPI) -> dict:
     settings = get_settings()
     error = getattr(app.state, "engine_error", None)
@@ -88,6 +156,7 @@ def _degraded_health_payload(app: FastAPI) -> dict:
         "ready": market_ready,
         "error": str(error) if error else "Foresight engine is not ready",
         "market_data": market_data,
+        "artifact_engine": _artifact_engine_status(app),
     }
 
 
@@ -104,11 +173,17 @@ def _raise_if_required_supabase_unavailable(payload: dict) -> None:
 def _require_engine(app: FastAPI):
     engine = getattr(app.state, "engine", None)
     if engine is None:
+        _start_artifact_engine_background_load(app)
         error = getattr(app.state, "engine_error", None)
+        loading = bool(getattr(app.state, "engine_loading", False))
         detail = "Foresight engine is not ready"
+        headers = None
+        if loading:
+            detail = "Foresight engine is loading in the background; retry in a few seconds"
+            headers = {"Retry-After": "15"}
         if error is not None:
             detail = f"{detail}: {error}"
-        raise HTTPException(status_code=503, detail=detail)
+        raise HTTPException(status_code=503, detail=detail, headers=headers)
     return engine
 
 
@@ -265,6 +340,9 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         app.state.engine = None
         app.state.engine_error = None
+        app.state.engine_loading = False
+        app.state.engine_lock = threading.Lock()
+        app.state.engine_loader_thread = None
         app.state.market_repository = None
         app.state.market_repository_error = None
         app.state.forecast_engine = None
@@ -303,6 +381,8 @@ def create_app() -> FastAPI:
                 app.state.engine = _load_engine()
             except Exception as exc:  # pragma: no cover - defensive startup path
                 app.state.engine_error = exc
+        elif settings.lazy_load_artifact_engine:
+            app.state.engine_error = None
         else:
             app.state.engine_error = "Artifact engine disabled by FORESIGHT_LOAD_ARTIFACT_ENGINE=false"
         yield
@@ -321,6 +401,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def trigger_artifact_engine_load(request, call_next):
+        if request.url.path.startswith(settings.api_prefix):
+            _start_artifact_engine_background_load(app)
+        return await call_next(request)
+
     @app.get(f"{settings.api_prefix}/health", response_model=HealthResponse)
     def health():
         engine = getattr(app.state, "engine", None)
@@ -331,6 +417,7 @@ def create_app() -> FastAPI:
         payload = engine.health_payload()
         payload["ready"] = True
         payload["market_data"] = _market_health_payload(app)
+        payload["artifact_engine"] = _artifact_engine_status(app)
         _raise_if_required_supabase_unavailable(payload)
         return payload
 
