@@ -3,6 +3,7 @@ const LOCAL_API_BASE = "http://localhost:8000";
 const API_TIMEOUT_MS = 45_000;
 const MAX_FORECAST_HORIZON_DAYS = 730;
 const MAX_FORECAST_WINDOW_SIZE = 756;
+const MAX_RL_BACKTEST_STEPS = 120;
 const RETIRED_API_BASES = new Set([
   "https://stockify-backend-adc6.onrender.com",
 ]);
@@ -2174,7 +2175,8 @@ async function runBacktest() {
         initial_amount: Number(elements.amount.value),
         risk: Number(elements.risk.value),
         window_size: selectedWindowSize(),
-        max_steps: selectedHorizonDays(),
+        max_steps: Math.min(selectedHorizonDays(), MAX_RL_BACKTEST_STEPS),
+        include_trade_log: false,
         strict_validation: true,
       }),
     });

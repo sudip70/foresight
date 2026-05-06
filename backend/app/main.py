@@ -764,6 +764,7 @@ def create_app() -> FastAPI:
                 risk=request.risk,
                 window_size=request.window_size,
                 max_steps=request.max_steps or settings.default_backtest_steps,
+                include_trade_log=request.include_trade_log,
             )
             return result.__dict__
         except HTTPException:
