@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 import json
+import math
 from pathlib import Path
 from typing import Any
-
-import numpy as np
-import pandas as pd
 
 from backend.app.core.config import Settings
 
@@ -25,17 +23,17 @@ def _clean_number(value: Any) -> float | None:
     if value is None:
         return None
     try:
-        if pd.isna(value):
-            return None
         parsed = float(value)
-        if np.isfinite(parsed):
+        if math.isfinite(parsed):
             return parsed
     except (TypeError, ValueError):
         return None
     return None
 
 
-def _ensure_multiindex(frame: pd.DataFrame, symbols: list[str]) -> pd.DataFrame:
+def _ensure_multiindex(frame, symbols: list[str]):
+    import pandas as pd
+
     if not isinstance(frame.columns, pd.MultiIndex):
         if len(symbols) != 1:
             raise ValueError("Expected multi-index columns for multiple index symbols")
@@ -55,6 +53,7 @@ def _fetch_yfinance_market_indices(
     start_date: str,
     end_date: str,
 ) -> list[dict[str, Any]]:
+    import pandas as pd
     import yfinance as yf
 
     symbols = [row["provider_symbol"] for row in indices]
@@ -122,7 +121,9 @@ def _fetch_yfinance_market_indices(
     return rows
 
 
-def _normalize_single_symbol_frame(frame: pd.DataFrame, provider_symbol: str) -> pd.DataFrame:
+def _normalize_single_symbol_frame(frame, provider_symbol: str):
+    import pandas as pd
+
     if not isinstance(frame.columns, pd.MultiIndex):
         return frame.copy()
     normalized = _ensure_multiindex(frame, [provider_symbol])
@@ -137,6 +138,7 @@ def _fetch_yfinance_market_index_history(
     start_date: str,
     end_date: str,
 ) -> list[dict[str, Any]]:
+    import pandas as pd
     import yfinance as yf
 
     provider_symbol = index["provider_symbol"]
@@ -492,6 +494,11 @@ def fetch_market_index_snapshots(
         date.today() - timedelta(days=max(settings.market_index_refresh_lookback_days, 1))
     ).isoformat()
     provider_name = settings.market_data_provider.strip().lower()
+    if provider_name == "supabase_proxy" and repository is not None:
+        return fetch_market_index_snapshots_from_repository(
+            settings,
+            repository=repository,
+        )
     if provider_name != "yfinance":
         raise ValueError(f"Unsupported market index provider: {settings.market_data_provider}")
     rows = _fetch_yfinance_market_indices(indices, start_date=start_date, end_date=end_date)

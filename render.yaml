@@ -22,8 +22,16 @@ services:
       - key: FORESIGHT_ARTIFACT_POLICY_MODE
         value: signal
       - key: FORESIGHT_MARKET_DATA_PROVIDER
-        value: yfinance
+        value: supabase_proxy
       - key: FORESIGHT_MARKET_INDEX_AUTO_REFRESH
         value: "false"
       - key: FORESIGHT_MARKET_INDEX_REFRESH_LOOKBACK_DAYS
         value: "10"
+      - key: MALLOC_ARENA_MAX
+        value: "2"
+      - key: OPENBLAS_NUM_THREADS
+        value: "1"
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: MKL_NUM_THREADS
+        value: "1"
