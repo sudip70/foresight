@@ -108,6 +108,7 @@ class ArtifactStore:
                 self.settings.artifact_root,
                 asset_class,
                 strict=self.strict_validation,
+                policy_mode=self.settings.artifact_policy_mode,
             )
             for asset_class in ASSET_CLASSES
         }
@@ -117,6 +118,7 @@ class ArtifactStore:
             self.settings.artifact_root,
             observation_dim=observation_dim,
             action_dim=action_dim,
+            policy_mode=self.settings.artifact_policy_mode,
         )
 
 
@@ -200,12 +202,16 @@ class ForesightEngine:
             macro_dim=self._meta_macro_dim(combined_context),
             class_feature_dim=self._meta_class_feature_dim(),
         )
+        use_trained_meta_action_layout = (
+            self.settings.artifact_policy_mode != "signal"
+            and self._meta_metadata_hint.get("policy_action_layout")
+            == "stock_crypto_etf_cash_sleeves"
+        )
         meta = self.artifact_store.load_meta(
             observation_dim=meta_obs_dim,
             action_dim=int(
                 self._meta_metadata_hint.get("action_dim", total_assets)
-                if self._meta_metadata_hint.get("policy_action_layout")
-                == "stock_crypto_etf_cash_sleeves"
+                if use_trained_meta_action_layout
                 else total_assets
             ),
         )
@@ -346,6 +352,7 @@ class ForesightEngine:
             "meta_model": {
                 "feature_version": self.runtime.meta.metadata.get("feature_version"),
                 "policy_backend": self.runtime.meta.metadata.get("policy_backend"),
+                "policy_mode": self.settings.artifact_policy_mode,
             },
         }
 
@@ -360,6 +367,10 @@ class ForesightEngine:
                     "trimmed": bundle.alignment.trimmed,
                     "feature_version": bundle.metadata.get("feature_version"),
                     "policy_backend": bundle.metadata.get("policy_backend"),
+                    "policy_mode": bundle.metadata.get(
+                        "policy_mode",
+                        self.settings.artifact_policy_mode,
+                    ),
                     "algorithm": bundle.metadata.get("algorithm"),
                 }
             )
@@ -380,6 +391,10 @@ class ForesightEngine:
             "meta_agent": {
                 "algorithm": self.runtime.meta.metadata.get("algorithm"),
                 "policy_backend": self.runtime.meta.metadata.get("policy_backend"),
+                "policy_mode": self.runtime.meta.metadata.get(
+                    "policy_mode",
+                    self.settings.artifact_policy_mode,
+                ),
                 "feature_version": self.runtime.meta.metadata.get("feature_version"),
                 "cash_enabled": self.settings.meta_cash_enabled,
                 "max_cash_weight": self.settings.meta_max_cash_weight,

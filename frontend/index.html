@@ -178,7 +178,7 @@
               <label for="apiBase">Backend URL</label>
               <input id="apiBase" type="url" placeholder="https://foresight-backend-a5qx.onrender.com" />
               <label for="windowSize">Estimator window</label>
-              <input id="windowSize" type="number" min="2" value="60" step="1" />
+              <input id="windowSize" type="number" min="2" max="756" value="60" step="1" />
               <button id="saveApiBase">Use Backend</button>
               <p id="apiStatus" class="muted">Waiting for connection.</p>
             </div>
@@ -337,7 +337,7 @@
               <select id="tickerSelect" aria-label="Ticker"></select>
               <div class="forecast-horizon-field">
                 <label for="forecastHorizon">Horizon (Days)</label>
-                <input id="forecastHorizon" type="number" min="1" value="300" step="1" />
+                <input id="forecastHorizon" type="number" min="1" max="730" value="300" step="1" />
               </div>
               <button id="runTickerForecast">Run forecast</button>
             </div>
@@ -454,7 +454,7 @@
               <span class="control-divider" aria-hidden="true"></span>
               <div class="control-field horizon-field">
                 <label for="horizon">Horizon (days)</label>
-                <input id="horizon" type="number" min="1" value="300" step="1" />
+                <input id="horizon" type="number" min="1" max="730" value="300" step="1" />
               </div>
               <button id="refreshDashboard" class="secondary-button">Refresh data</button>
             </div>

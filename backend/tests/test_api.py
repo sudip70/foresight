@@ -5,6 +5,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 import backend.app.main as app_main
+from backend.app.api.schemas import (
+    MAX_BACKTEST_STEPS,
+    MAX_FORECAST_HORIZON_DAYS,
+    MAX_FORECAST_WINDOW_SIZE,
+)
 from backend.app.core.config import reset_settings
 from backend.app.main import create_app
 from backend.app.ml.pipeline import reset_engine
@@ -96,6 +101,40 @@ def test_ticker_forecast_invalid_ticker_returns_clear_error(client):
     )
     assert response.status_code == 422
     assert "Unsupported ticker" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/api/forecasts/ticker",
+            {"ticker": "AAPL", "horizon_days": MAX_FORECAST_HORIZON_DAYS + 1},
+        ),
+        (
+            "/api/forecasts/market",
+            {"horizon_days": MAX_FORECAST_HORIZON_DAYS + 1},
+        ),
+        (
+            "/api/portfolio/simulations",
+            {"horizon_days": MAX_FORECAST_HORIZON_DAYS + 1},
+        ),
+        (
+            "/api/inference",
+            {"duration": MAX_FORECAST_HORIZON_DAYS + 1},
+        ),
+        (
+            "/api/backtests",
+            {"max_steps": MAX_BACKTEST_STEPS + 1},
+        ),
+        (
+            "/api/forecasts/market",
+            {"window_size": MAX_FORECAST_WINDOW_SIZE + 1},
+        ),
+    ],
+)
+def test_oversized_public_requests_are_rejected(client, path, payload):
+    response = client.post(path, json=payload)
+    assert response.status_code == 422
 
 
 def test_market_forecast_endpoint_returns_ranked_tickers(client):
@@ -208,6 +247,7 @@ def test_lazy_artifact_engine_loads_backtests_in_background(tmp_path, monkeypatc
         health = test_client.get("/api/health")
         assert health.status_code == 200
         assert health.json()["artifact_engine"]["lazy_enabled"] is True
+        assert health.json()["artifact_engine"]["status"] == "not_started"
 
         response = None
         for _ in range(20):
@@ -224,6 +264,49 @@ def test_lazy_artifact_engine_loads_backtests_in_background(tmp_path, monkeypatc
         assert response is not None
         assert response.status_code == 200
         assert response.json()["summary_metrics"]["ending_value"] > 0
+
+    reset_settings()
+    reset_engine()
+
+
+def test_signal_policy_mode_keeps_lazy_backtests_available(tmp_path, monkeypatch):
+    artifact_root = build_fixture_artifact_tree(tmp_path, version="v3")
+    dataset_root = tmp_path / "datasets"
+    dataset_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_LOAD_ARTIFACT_ENGINE", "false")
+    monkeypatch.setenv("FORESIGHT_LAZY_LOAD_ARTIFACT_ENGINE", "true")
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_POLICY_MODE", "signal")
+    monkeypatch.setenv("FORESIGHT_DEFAULT_BACKTEST_STEPS", "8")
+    reset_settings()
+    reset_engine()
+
+    with TestClient(create_app()) as test_client:
+        response = None
+        for _ in range(20):
+            response = test_client.post(
+                "/api/backtests",
+                json={"initial_amount": 10000, "risk": 0.5, "window_size": 5, "max_steps": 8},
+            )
+            if response.status_code == 200:
+                break
+            assert response.status_code == 503
+            time.sleep(0.05)
+
+        assert response is not None
+        assert response.status_code == 200
+        assert response.json()["summary_metrics"]["ending_value"] > 0
+
+        models = test_client.get("/api/models")
+        assert models.status_code == 200
+        payload = models.json()
+        assert payload["meta_agent"]["policy_backend"] == "meta_signal"
+        assert payload["meta_agent"]["policy_mode"] == "signal"
+        assert {
+            agent["policy_backend"] for agent in payload["asset_agents"]
+        } == {"single_agent_signal"}
 
     reset_settings()
     reset_engine()

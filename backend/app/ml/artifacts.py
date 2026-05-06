@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 import json
 
-import joblib
 import numpy as np
 
 from backend.app.ml.envs import single_agent_observation_dim
@@ -14,6 +13,7 @@ from backend.app.ml.policies import load_policy
 
 
 ASSET_CLASSES = ("stock", "crypto", "etf")
+ARTIFACT_POLICY_MODE_SIGNAL = "signal"
 DEFAULT_MACRO_NAMES = [
     "vix_market_volatility",
     "federal_funds_rate",
@@ -70,13 +70,19 @@ def _read_optional_json(path: Path) -> dict:
 def _load_optional_pickle(path: Path):
     if not path.exists():
         return None
+    try:
+        import joblib
+    except ImportError as exc:  # pragma: no cover - deployment dependency guard
+        raise ArtifactValidationError(
+            f"Cannot load optional scaler {path}; joblib is not installed"
+        ) from exc
     install_numpy_pickle_compat()
     return joblib.load(path)
 
 
 def _synthetic_ohlcv_from_prices(prices: np.ndarray) -> np.ndarray:
-    prices = np.asarray(prices, dtype=float)
-    ohlcv = np.zeros((prices.shape[0], prices.shape[1], 5), dtype=float)
+    prices = np.asarray(prices, dtype=np.float32)
+    ohlcv = np.zeros((prices.shape[0], prices.shape[1], 5), dtype=np.float32)
     ohlcv[:, :, 0] = prices
     ohlcv[:, :, 1] = prices
     ohlcv[:, :, 2] = prices
@@ -93,16 +99,16 @@ def _append_cash_sleeve_to_market_data(
 ) -> tuple[np.ndarray, np.ndarray]:
     daily_return = (1.0 + float(cash_annual_return)) ** (1.0 / 252.0) - 1.0
     cash_prices = np.cumprod(
-        np.full(np.asarray(prices).shape[0], 1.0 + daily_return, dtype=float)
+        np.full(np.asarray(prices).shape[0], 1.0 + daily_return, dtype=np.float32)
     ).reshape(-1, 1)
-    cash_ohlcv = np.zeros((cash_prices.shape[0], 1, 5), dtype=float)
+    cash_ohlcv = np.zeros((cash_prices.shape[0], 1, 5), dtype=np.float32)
     cash_ohlcv[:, 0, 0] = cash_prices[:, 0]
     cash_ohlcv[:, 0, 1] = cash_prices[:, 0]
     cash_ohlcv[:, 0, 2] = cash_prices[:, 0]
     cash_ohlcv[:, 0, 3] = cash_prices[:, 0]
     cash_ohlcv[:, 0, 4] = 1.0
-    return np.hstack([np.asarray(prices, dtype=float), cash_prices]), np.concatenate(
-        [np.asarray(ohlcv, dtype=float), cash_ohlcv],
+    return np.hstack([np.asarray(prices, dtype=np.float32), cash_prices]), np.concatenate(
+        [np.asarray(ohlcv, dtype=np.float32), cash_ohlcv],
         axis=1,
     )
 
@@ -114,6 +120,19 @@ def _default_dates(row_count: int) -> np.ndarray:
 def _ensure_finite(name: str, values: np.ndarray) -> None:
     if not np.isfinite(values).all():
         raise ArtifactValidationError(f"{name} contains NaN or infinite values")
+
+
+def _tail_array(values: np.ndarray, rows: int, dtype: np.dtype | type) -> np.ndarray:
+    tail = np.asarray(values)[-int(rows) :]
+    return tail.astype(dtype, copy=False)
+
+
+def _load_npy(path: Path) -> np.ndarray:
+    return np.load(path, mmap_mode="r")
+
+
+def _signal_policy_mode(policy_mode: str) -> bool:
+    return str(policy_mode).strip().lower() == ARTIFACT_POLICY_MODE_SIGNAL
 
 
 def _load_asset_policy(
@@ -219,14 +238,14 @@ def validate_and_align_asset_artifacts(
         if dates is not None
         else _default_dates(aligned_rows)
     )
-    prices = np.asarray(prices, dtype=float)[-aligned_rows:]
+    prices = _tail_array(prices, aligned_rows, np.float32)
     if ohlcv is None:
         ohlcv = _synthetic_ohlcv_from_prices(prices)
     else:
-        ohlcv = np.asarray(ohlcv, dtype=float)[-aligned_rows:]
-    regimes = np.asarray(regimes, dtype=int).reshape(-1)[-aligned_rows:]
-    micro_indicators = np.asarray(micro_indicators, dtype=float)[-aligned_rows:]
-    macro_indicators = np.asarray(macro_indicators, dtype=float)[-aligned_rows:]
+        ohlcv = _tail_array(ohlcv, aligned_rows, np.float32)
+    regimes = _tail_array(np.asarray(regimes).reshape(-1), aligned_rows, np.int16)
+    micro_indicators = _tail_array(micro_indicators, aligned_rows, np.float32)
+    macro_indicators = _tail_array(macro_indicators, aligned_rows, np.float32)
 
     if prices.ndim != 2:
         raise ArtifactValidationError("prices must be a 2D array")
@@ -267,7 +286,14 @@ def validate_and_align_asset_artifacts(
     )
 
 
-def load_asset_artifacts(root: Path, asset_class: str, *, strict: bool) -> AssetArtifacts:
+def load_asset_artifacts(
+    root: Path,
+    asset_class: str,
+    *,
+    strict: bool,
+    policy_mode: str = "trained",
+) -> AssetArtifacts:
+    use_signal_policy = _signal_policy_mode(policy_mode)
     asset_dir = root / asset_class
     if not asset_dir.exists():
         raise ArtifactValidationError(f"Missing asset directory: {asset_dir}")
@@ -276,21 +302,26 @@ def load_asset_artifacts(root: Path, asset_class: str, *, strict: bool) -> Asset
     metadata = _default_asset_metadata(asset_class)
     if metadata_path.exists():
         metadata.update(_read_json(metadata_path))
+    if use_signal_policy:
+        metadata["source_policy_backend"] = metadata.get("policy_backend", "sb3")
+        metadata["policy_backend"] = "single_agent_signal"
+        metadata["algorithm"] = "signal"
+        metadata["policy_mode"] = ARTIFACT_POLICY_MODE_SIGNAL
 
     tickers = json.loads((asset_dir / "tickers.json").read_text())
     dates_path = asset_dir / "dates.npy"
-    dates = np.load(dates_path) if dates_path.exists() else None
-    prices = np.load(asset_dir / "prices.npy")
+    dates = _load_npy(dates_path) if dates_path.exists() else None
+    prices = _load_npy(asset_dir / "prices.npy")
     ohlcv_path = asset_dir / "ohlcv.npy"
-    ohlcv = np.load(ohlcv_path) if ohlcv_path.exists() else None
-    regimes = np.load(asset_dir / "regimes.npy")
-    micro_indicators = np.load(asset_dir / "micro_indicators.npy")
-    macro_indicators = np.load(asset_dir / "macro_indicators.npy")
+    ohlcv = _load_npy(ohlcv_path) if ohlcv_path.exists() else None
+    regimes = _load_npy(asset_dir / "regimes.npy")
+    micro_indicators = _load_npy(asset_dir / "micro_indicators.npy")
+    macro_indicators = _load_npy(asset_dir / "macro_indicators.npy")
     macro_indicators_raw_path = asset_dir / "macro_indicators_raw.npy"
     macro_indicators_raw = (
-        np.load(macro_indicators_raw_path)
+        _load_npy(macro_indicators_raw_path)
         if macro_indicators_raw_path.exists()
-        else np.asarray(macro_indicators, dtype=float)
+        else np.asarray(macro_indicators, dtype=np.float32)
     )
 
     (
@@ -350,7 +381,7 @@ def load_asset_artifacts(root: Path, asset_class: str, *, strict: bool) -> Asset
         + int(micro_indicators.shape[1])
         + int(macro_indicators.shape[1])
     )
-    model_file = metadata.get("model_file", "model.zip")
+    model_file = "__signal_policy.json" if use_signal_policy else metadata.get("model_file", "model.zip")
     policy, policy_observation_dim = _load_asset_policy(
         asset_dir / model_file,
         metadata,
@@ -378,9 +409,17 @@ def load_asset_artifacts(root: Path, asset_class: str, *, strict: bool) -> Asset
         regimes=regimes,
         micro_indicators=micro_indicators,
         macro_indicators=macro_indicators,
-        macro_indicators_raw=macro_indicators_raw[-alignment.aligned_rows:],
-        indicator_scaler=_load_optional_pickle(asset_dir / "indicator_scaler.pkl"),
-        macro_scaler=_load_optional_pickle(asset_dir / "macro_scaler.pkl"),
+        macro_indicators_raw=_tail_array(
+            macro_indicators_raw,
+            alignment.aligned_rows,
+            np.float32,
+        ),
+        indicator_scaler=None
+        if use_signal_policy
+        else _load_optional_pickle(asset_dir / "indicator_scaler.pkl"),
+        macro_scaler=None
+        if use_signal_policy
+        else _load_optional_pickle(asset_dir / "macro_scaler.pkl"),
         policy=policy,
         metadata=metadata,
         alignment=alignment,
@@ -392,7 +431,9 @@ def load_meta_artifacts(
     *,
     observation_dim: int | None = None,
     action_dim: int | None = None,
+    policy_mode: str = "trained",
 ) -> MetaArtifacts:
+    use_signal_policy = _signal_policy_mode(policy_mode)
     meta_dir = root / "meta"
     if not meta_dir.exists():
         raise ArtifactValidationError(f"Missing meta directory: {meta_dir}")
@@ -401,6 +442,15 @@ def load_meta_artifacts(
     metadata_path = meta_dir / "metadata.json"
     if metadata_path.exists():
         metadata.update(_read_json(metadata_path))
+    if use_signal_policy:
+        metadata["source_policy_backend"] = metadata.get("policy_backend", "sb3")
+        metadata["policy_backend"] = "meta_signal"
+        metadata["algorithm"] = "signal"
+        metadata["policy_mode"] = ARTIFACT_POLICY_MODE_SIGNAL
+        metadata["model_file"] = "__meta_signal_policy.json"
+        metadata.pop("policy_action_layout", None)
+        if action_dim is not None:
+            metadata["action_dim"] = int(action_dim)
 
     model_path = meta_dir / metadata.get("model_file", "model.zip")
     candidate_dims: list[int | None] = [observation_dim]
@@ -440,7 +490,9 @@ def load_meta_artifacts(
         policy=policy,
         metadata=metadata,
         model_path=model_path,
-        macro_scaler=_load_optional_pickle(meta_dir / "meta_macro_scaler.pkl"),
+        macro_scaler=None
+        if use_signal_policy
+        else _load_optional_pickle(meta_dir / "meta_macro_scaler.pkl"),
     )
 
 

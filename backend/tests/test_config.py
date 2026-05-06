@@ -10,6 +10,7 @@ def test_foresight_env_vars_override_legacy_stockify_fallback(tmp_path, monkeypa
     monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
     monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
     monkeypatch.setenv("FORESIGHT_MARKET_DATA_PROVIDER", "preferred")
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_POLICY_MODE", "signal")
     monkeypatch.setenv("STOCKIFY_MARKET_DATA_PROVIDER", "legacy")
 
     reset_settings()
@@ -18,6 +19,7 @@ def test_foresight_env_vars_override_legacy_stockify_fallback(tmp_path, monkeypa
     assert settings.artifact_root == artifact_root
     assert settings.dataset_root == dataset_root
     assert settings.market_data_provider == "preferred"
+    assert settings.artifact_policy_mode == "signal"
 
     reset_settings()
 

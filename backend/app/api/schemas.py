@@ -5,6 +5,11 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+MAX_FORECAST_HORIZON_DAYS = 730
+MAX_FORECAST_WINDOW_SIZE = 756
+MAX_BACKTEST_STEPS = 756
+
+
 class HealthResponse(BaseModel):
     status: str
     artifact_root: str
@@ -47,8 +52,8 @@ class TickerProfileResponse(BaseModel):
 
 class TickerForecastRequest(BaseModel):
     ticker: str = Field(min_length=1)
-    horizon_days: int = Field(default=300, ge=1)
-    window_size: int = Field(default=60, ge=2)
+    horizon_days: int = Field(default=300, ge=1, le=MAX_FORECAST_HORIZON_DAYS)
+    window_size: int = Field(default=60, ge=2, le=MAX_FORECAST_WINDOW_SIZE)
     strict_validation: bool = True
 
 
@@ -77,10 +82,10 @@ class TickerForecastResponse(BaseModel):
 
 
 class MarketForecastRequest(BaseModel):
-    horizon_days: int = Field(default=300, ge=1)
+    horizon_days: int = Field(default=300, ge=1, le=MAX_FORECAST_HORIZON_DAYS)
     risk: float = Field(default=0.5, ge=0.0, le=1.0)
     top_n: int = Field(default=10, ge=1, le=50)
-    window_size: int = Field(default=60, ge=2)
+    window_size: int = Field(default=60, ge=2, le=MAX_FORECAST_WINDOW_SIZE)
     strict_validation: bool = True
 
 
@@ -119,9 +124,9 @@ class MarketIndexHistoryResponse(BaseModel):
 class PortfolioSimulationRequest(BaseModel):
     amount: float = Field(default=10000.0, gt=0)
     risk: float = Field(default=0.5, ge=0.0, le=1.0)
-    horizon_days: int = Field(default=300, ge=1)
+    horizon_days: int = Field(default=300, ge=1, le=MAX_FORECAST_HORIZON_DAYS)
     selected_tickers: list[str] | None = None
-    window_size: int = Field(default=60, ge=2)
+    window_size: int = Field(default=60, ge=2, le=MAX_FORECAST_WINDOW_SIZE)
     strict_validation: bool = True
 
 
@@ -141,8 +146,8 @@ class PortfolioSimulationResponse(BaseModel):
 class InferenceRequest(BaseModel):
     amount: float = Field(default=10000.0, gt=0)
     risk: float = Field(default=0.5, ge=0.0, le=1.0)
-    duration: int = Field(default=30, ge=1)
-    window_size: int = Field(default=60, ge=2)
+    duration: int = Field(default=30, ge=1, le=MAX_FORECAST_HORIZON_DAYS)
+    window_size: int = Field(default=60, ge=2, le=MAX_FORECAST_WINDOW_SIZE)
     strict_validation: bool = True
 
 
@@ -182,8 +187,8 @@ class ExplanationResponse(BaseModel):
 class BacktestRequest(BaseModel):
     initial_amount: float = Field(default=10000.0, gt=0)
     risk: float = Field(default=0.5, ge=0.0, le=1.0)
-    window_size: int = Field(default=60, ge=2)
-    max_steps: int | None = Field(default=None, ge=1)
+    window_size: int = Field(default=60, ge=2, le=MAX_FORECAST_WINDOW_SIZE)
+    max_steps: int | None = Field(default=None, ge=1, le=MAX_BACKTEST_STEPS)
     strict_validation: bool = True
 
 
