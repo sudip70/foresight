@@ -130,6 +130,18 @@ def _start_artifact_engine_background_load(app: FastAPI) -> bool:
         return True
 
 
+def _should_preload_artifact_engine(path: str) -> bool:
+    api_prefix = get_settings().api_prefix.rstrip("/")
+    normalized = path.rstrip("/") or "/"
+    artifact_paths = {
+        f"{api_prefix}/models",
+        f"{api_prefix}/inference",
+        f"{api_prefix}/explanations",
+        f"{api_prefix}/backtests",
+    }
+    return normalized in artifact_paths
+
+
 def _degraded_health_payload(app: FastAPI) -> dict:
     settings = get_settings()
     error = getattr(app.state, "engine_error", None)
@@ -403,7 +415,7 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def trigger_artifact_engine_load(request, call_next):
-        if request.url.path.startswith(settings.api_prefix):
+        if _should_preload_artifact_engine(request.url.path):
             _start_artifact_engine_background_load(app)
         return await call_next(request)
 

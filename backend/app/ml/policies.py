@@ -4,12 +4,16 @@ from dataclasses import dataclass
 from pathlib import Path
 import json
 
-from gymnasium import spaces
 import numpy as np
 
 from backend.app.ml.envs import SINGLE_AGENT_MARKET_BLOCKS
 from backend.app.ml.feature_groups import build_feature_slices
 from backend.app.ml.numpy_compat import install_numpy_pickle_compat
+
+try:  # gymnasium is only needed when loading trained SB3 models.
+    from gymnasium import spaces
+except ImportError:  # pragma: no cover - slim deployment guard
+    spaces = None
 
 
 class PolicyLoadError(RuntimeError):
@@ -708,6 +712,8 @@ def _build_box_spaces(
 ) -> tuple[spaces.Box, spaces.Box] | tuple[None, None]:
     if observation_dim is None or action_dim is None:
         return None, None
+    if spaces is None:
+        raise PolicyLoadError("gymnasium is not installed")
     observation_space = spaces.Box(
         low=-np.inf,
         high=np.inf,

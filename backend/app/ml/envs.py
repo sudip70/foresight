@@ -2,8 +2,29 @@ from __future__ import annotations
 
 import numpy as np
 
-import gymnasium as gym
-from gymnasium import spaces
+try:  # gymnasium is optional for lightweight deployed inference/backtesting.
+    import gymnasium as gym
+    from gymnasium import spaces
+except ImportError:  # pragma: no cover - exercised only in slim deployments
+    class _FallbackEnv:
+        def reset(self, *, seed: int | None = None, options: dict | None = None):
+            return None, {}
+
+    class _FallbackBox:
+        def __init__(self, *, low, high, shape, dtype) -> None:
+            self.low = low
+            self.high = high
+            self.shape = tuple(shape)
+            self.dtype = dtype
+
+    class _FallbackGym:
+        Env = _FallbackEnv
+
+    class _FallbackSpaces:
+        Box = _FallbackBox
+
+    gym = _FallbackGym()
+    spaces = _FallbackSpaces()
 
 
 SINGLE_AGENT_PRICE_FEATURES = (

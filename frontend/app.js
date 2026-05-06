@@ -1,6 +1,8 @@
 const DEPLOYED_API_BASE = "https://foresight-backend-a5qx.onrender.com";
 const LOCAL_API_BASE = "http://localhost:8000";
 const API_TIMEOUT_MS = 45_000;
+const MAX_FORECAST_HORIZON_DAYS = 730;
+const MAX_FORECAST_WINDOW_SIZE = 756;
 const RETIRED_API_BASES = new Set([
   "https://stockify-backend-adc6.onrender.com",
 ]);
@@ -321,6 +323,11 @@ function escapeHtml(value) {
   });
 }
 
+function cssClassToken(value, fallback = "") {
+  const token = String(value || "");
+  return /^[a-z0-9_-]+$/i.test(token) ? token : fallback;
+}
+
 function hasProfileValue(value) {
   if (value === null || value === undefined) return false;
   if (typeof value === "string") return value.trim() !== "";
@@ -480,17 +487,19 @@ function sparklineSvg(change) {
 }
 
 function insight(message, tone = "info") {
-  return `<article class="insight ${tone}"><span>${message}</span></article>`;
+  return `<article class="insight ${cssClassToken(tone, "info")}"><span>${escapeHtml(message)}</span></article>`;
 }
 
 function metricCard(label, value, tooltip, subtitle = "", valueTone = "") {
-  const tip = tooltip ? `<button class="why-btn" data-why="${label}: ${tooltip}" type="button">?</button>` : "";
-  const detail = subtitle ? `<span class="metric-subtitle">${subtitle}</span>` : "";
-  const toneClass = valueTone ? ` ${valueTone}` : "";
+  const safeLabel = escapeHtml(label);
+  const safeTooltip = escapeHtml(tooltip);
+  const tip = tooltip ? `<button class="why-btn" data-why="${safeLabel}: ${safeTooltip}" type="button">?</button>` : "";
+  const detail = subtitle ? `<span class="metric-subtitle">${escapeHtml(subtitle)}</span>` : "";
+  const toneClass = valueTone ? ` ${cssClassToken(valueTone)}` : "";
   return `
     <article class="metric">
-      <h3>${label} ${tip}</h3>
-      <strong class="animate-number${toneClass}">${value}</strong>
+      <h3>${safeLabel} ${tip}</h3>
+      <strong class="animate-number${toneClass}">${escapeHtml(value)}</strong>
       ${detail}
       <div class="why-popover-slot"></div>
     </article>
@@ -545,7 +554,7 @@ function showToast(message, type = "info") {
   const icons = { info: "info-circle", error: "x-circle", success: "check-circle" };
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
-  toast.innerHTML = `${iconSvg(icons[type] || icons.info, "toast-icon")}<span>${message}</span>`;
+  toast.innerHTML = `${iconSvg(icons[type] || icons.info, "toast-icon")}<span>${escapeHtml(message)}</span>`;
   container.appendChild(toast);
   setTimeout(() => { toast.style.opacity = "0"; toast.style.transition = "opacity 200ms"; setTimeout(() => toast.remove(), 250); }, 4000);
 }
@@ -589,8 +598,8 @@ function renderGlossary() {
     .map(
       (term) => `
         <article class="glossary-item">
-          <strong>${term.title}</strong>
-          <span>${term.definition}</span>
+          <strong>${escapeHtml(term.title)}</strong>
+          <span>${escapeHtml(term.definition)}</span>
         </article>
       `,
     )
@@ -608,7 +617,7 @@ function setLoading(target, message = "Loading...") {
 }
 
 function setError(target, message) {
-  target.innerHTML = `<article class="error-banner">${message}</article>`;
+  target.innerHTML = `<article class="error-banner">${escapeHtml(message)}</article>`;
 }
 
 function setBackendEmptyState(visible) {
@@ -712,11 +721,22 @@ function isBackendConnectionError(error) {
 
 function selectedHorizonDays() {
   const parsed = Number(elements.forecastHorizon?.value || elements.horizon.value || 300);
-  return Number.isFinite(parsed) && parsed >= 1 ? Math.round(parsed) : 300;
+  if (!Number.isFinite(parsed) || parsed < 1) return 300;
+  return Math.min(Math.round(parsed), MAX_FORECAST_HORIZON_DAYS);
+}
+
+function selectedWindowSize() {
+  const parsed = Number(elements.windowSize.value || 60);
+  if (!Number.isFinite(parsed) || parsed < 2) return 60;
+  return Math.min(Math.round(parsed), MAX_FORECAST_WINDOW_SIZE);
 }
 
 function syncHorizonControls(value) {
-  const nextValue = String(value || "");
+  const parsed = Number(value);
+  const nextValue =
+    Number.isFinite(parsed) && parsed >= 1
+      ? String(Math.min(Math.round(parsed), MAX_FORECAST_HORIZON_DAYS))
+      : String(value || "");
   if (elements.horizon.value !== nextValue) {
     elements.horizon.value = nextValue;
   }
@@ -733,7 +753,7 @@ function dashboardPayload(extra = {}) {
   return {
     horizon_days: selectedHorizonDays(),
     risk: Number(elements.risk.value),
-    window_size: Number(elements.windowSize.value),
+    window_size: selectedWindowSize(),
     strict_validation: true,
     ...extra,
   };
@@ -744,7 +764,7 @@ function allocationPayload() {
     amount: Number(elements.amount.value),
     risk: Number(elements.risk.value),
     duration: selectedHorizonDays(),
-    window_size: Number(elements.windowSize.value),
+    window_size: selectedWindowSize(),
     strict_validation: true,
   };
 }
@@ -794,7 +814,7 @@ function renderMacro(snapshot) {
     const row = document.createElement("div");
     row.className = "row two-column";
     row.innerHTML = `
-      <span>${entry.name}</span>
+      <span>${escapeHtml(entry.name)}</span>
       <strong>${formatNumber(entry.value, 2)}</strong>
     `;
     elements.macroSnapshot.appendChild(row);
@@ -838,7 +858,7 @@ function renderMarketIndices(result) {
       return `
         <article class="index-card">
           <div>
-            <span>${entry.label || entry.symbol}</span>
+            <span>${escapeHtml(entry.label || entry.symbol)}</span>
             <strong>${formatIndexValue(entry.value)}</strong>
             <div class="index-change ${tone}">
               <span>${formatSignedNumber(entry.change)}</span>
@@ -1041,10 +1061,10 @@ function renderTopOpportunities(result) {
       .map(
         (entry) => `
           <div class="row top-row">
-            <strong>${entry.ticker}</strong>
-            <span>${entry.asset_class}</span>
+            <strong>${escapeHtml(entry.ticker)}</strong>
+            <span>${escapeHtml(entry.asset_class)}</span>
             <span class="${toneForValue(entry.returns.base)}">${formatPercent(entry.returns.base)}</span>
-            <span>${entry.confidence_label}</span>
+            <span>${escapeHtml(entry.confidence_label)}</span>
           </div>
         `,
       )
@@ -1100,7 +1120,7 @@ function renderMarketLearning(result) {
     ),
     lessonCard(
       "How to compare rows",
-      `${bestBase?.ticker || "The top row"} may have the highest base scenario, while ${downside?.ticker || "another asset"} may carry the largest downside. A beginner-friendly comparison always reads upside and downside together.`,
+      `${escapeHtml(bestBase?.ticker || "The top row")} may have the highest base scenario, while ${escapeHtml(downside?.ticker || "another asset")} may carry the largest downside. A beginner-friendly comparison always reads upside and downside together.`,
     ),
     lessonCard(
       "Confidence check",
@@ -1153,13 +1173,13 @@ function renderMarket(result) {
     const row = document.createElement("div");
     row.className = "row market-row";
     row.innerHTML = `
-      <strong>${entry.ticker}</strong>
-      <span>${entry.asset_class}</span>
+      <strong>${escapeHtml(entry.ticker)}</strong>
+      <span>${escapeHtml(entry.asset_class)}</span>
       <span class="${toneForValue(entry.returns.base)}">${formatPercent(entry.returns.base)}</span>
       <span class="${toneForValue(entry.returns.bear)}">${formatPercent(entry.returns.bear)}</span>
       <span class="${toneForValue(entry.returns.bull)}">${formatPercent(entry.returns.bull)}</span>
-      <span>${entry.confidence_label}</span>
-      <button class="small-button" data-view-ticker="${entry.ticker}">View</button>
+      <span>${escapeHtml(entry.confidence_label)}</span>
+      <button class="small-button" data-view-ticker="${escapeHtml(entry.ticker)}">View</button>
     `;
     elements.marketTable.appendChild(row);
   });
@@ -1351,11 +1371,11 @@ function renderForecastLearning(forecast) {
   elements.forecastLessonContent.innerHTML = [
     lessonCard(
       "Start with the scenario range",
-      `${termChip("bear")} is the weaker case, ${termChip("base")} is the central estimate, and ${termChip("bull")} is the stronger case. For ${forecast.ticker}, the base return is ${signedPercentLabel(forecast.returns.base)} over ${forecast.horizon_days} days.`,
+      `${termChip("bear")} is the weaker case, ${termChip("base")} is the central estimate, and ${termChip("bull")} is the stronger case. For ${escapeHtml(forecast.ticker)}, the base return is ${signedPercentLabel(forecast.returns.base)} over ${forecast.horizon_days} days.`,
     ),
     lessonCard(
       "Read confidence as model readiness",
-      confidenceExplanation(forecast.confidence, forecast.confidence_label),
+      escapeHtml(confidenceExplanation(forecast.confidence, forecast.confidence_label)),
       `Current confidence: ${formatPercent(forecast.confidence)}.`,
     ),
     `<article class="risk-checklist">
@@ -1473,8 +1493,8 @@ function renderTickerProfile(profile, forecast) {
     .map(
       ({ label, value }) => `
         <div class="profile-item">
-          <span>${label}</span>
-          <strong>${value}</strong>
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value)}</strong>
         </div>
       `,
     )
@@ -1518,8 +1538,8 @@ function renderAllocationTable(target, allocations, options = {}) {
       .map(
         (allocation) => `
           <div class="row asset-row">
-            <strong>${allocation.ticker || allocation.asset_class}</strong>
-            <span>${allocation.asset_class || ""}</span>
+            <strong>${escapeHtml(allocation.ticker || allocation.asset_class)}</strong>
+            <span>${escapeHtml(allocation.asset_class || "")}</span>
             <span>${formatPercent(allocation.weight)}</span>
             <span>${formatCurrency(allocation.amount || 0)}</span>
           </div>
@@ -1544,7 +1564,7 @@ function renderTradePlan(target, trades) {
         return `
           <div class="row trade-row">
             <span class="action-pill ${isHold ? "hold" : ""}">${action}</span>
-            <strong>${trade.ticker}</strong>
+            <strong>${escapeHtml(trade.ticker)}</strong>
             <span>${formatPercent(trade.weight)}</span>
             <span>${formatCurrency(trade.amount)}</span>
           </div>
@@ -1831,17 +1851,17 @@ function renderDataHealthCards() {
     `<article class="health-card">
       <span>Data freshness</span>
       <strong>${latestRun.completed_at && !hasLiveIndexDate ? formatDateTime(latestRun.completed_at) : formatDate(latestMarketDate)}</strong>
-      <small>${latestSubtitle}</small>
+      <small>${escapeHtml(latestSubtitle)}</small>
     </article>`,
     `<article class="health-card">
       <span>Universe coverage</span>
       <strong>${formatInteger(assetCount)}</strong>
-      <small>${classCoverageLabel(state.universe)}</small>
+      <small>${escapeHtml(classCoverageLabel(state.universe))}</small>
     </article>`,
     `<article class="health-card">
       <span>Backtest summary</span>
       <strong>${isMissing(confidence) ? "Pending" : formatPercent(confidence)}</strong>
-      <small>${isMissing(confidence) ? models?.explainability?.method || "Scenario diagnostics pending" : `Avg confidence · ${backtestSubtitle}`}</small>
+      <small>${escapeHtml(isMissing(confidence) ? models?.explainability?.method || "Scenario diagnostics pending" : `Avg confidence · ${backtestSubtitle}`)}</small>
     </article>`,
   ].join("");
   renderProjectStory();
@@ -1856,7 +1876,7 @@ function renderProjectStory() {
   const latestSubtitle = latestDataSubtitle(refresh);
   const assetCount = refresh.asset_count ?? state.universe?.tickers?.length;
   const featureGroups = models.feature_groups ? Object.keys(models.feature_groups).length : 0;
-  const explainability = models.explainability?.method || "surrogate explainability";
+  const explainability = escapeHtml(models.explainability?.method || "surrogate explainability");
   const modelSurface = models.feature_groups
     ? `model metadata, ${formatInteger(featureGroups)} feature groups, forecasts, simulations, backtests, and ${explainability}`
     : "Supabase-backed forecasts, portfolio simulations, refresh diagnostics, and lazily loaded artifact endpoints for RL workflows";
@@ -1868,8 +1888,8 @@ function renderProjectStory() {
   const statusClass = state.health ? (health.ready === false ? "negative" : "positive") : "";
 
   elements.projectStats.innerHTML = [
-    `<article><span>Tracked universe</span><strong>${formatInteger(assetCount)}</strong><small>${classCoverageLabel(state.universe)}</small></article>`,
-    `<article><span>Latest data</span><strong>${formatDate(latestMarketDate)}</strong><small>${latestSubtitle}</small></article>`,
+    `<article><span>Tracked universe</span><strong>${formatInteger(assetCount)}</strong><small>${escapeHtml(classCoverageLabel(state.universe))}</small></article>`,
+    `<article><span>Latest data</span><strong>${formatDate(latestMarketDate)}</strong><small>${escapeHtml(latestSubtitle)}</small></article>`,
     `<article><span>Index history</span><strong>1M-5Y</strong><small>S&P 500, Nasdaq, TSX, and Dow charts</small></article>`,
     `<article><span>Backend status</span><strong class="${statusClass}">${statusLabel}</strong><small>FastAPI inference service</small></article>`,
   ].join("");
@@ -2153,8 +2173,8 @@ async function runBacktest() {
       body: JSON.stringify({
         initial_amount: Number(elements.amount.value),
         risk: Number(elements.risk.value),
-        window_size: Number(elements.windowSize.value),
-        max_steps: Number(elements.horizon.value),
+        window_size: selectedWindowSize(),
+        max_steps: selectedHorizonDays(),
         strict_validation: true,
       }),
     });
@@ -2500,7 +2520,7 @@ document.body.addEventListener("mouseover", (event) => {
     const key = chip.dataset.term;
     const term = glossary[key];
     if (term) {
-      showHoverTooltip(event, `<strong>${term.title}</strong><span>${term.definition}</span>`);
+      showHoverTooltip(event, `<strong>${escapeHtml(term.title)}</strong><span>${escapeHtml(term.definition)}</span>`);
     }
   }
 });
@@ -2559,10 +2579,10 @@ function renderCmdResults(query) {
     });
   }
   cmdResults.innerHTML = results.slice(0, 12).map((r) => `
-    <div class="cmd-result-item" data-cmd-type="${r.type}" data-cmd-value="${r.tab || r.key || r.ticker || ""}">
+    <div class="cmd-result-item" data-cmd-type="${escapeHtml(r.type)}" data-cmd-value="${escapeHtml(r.tab || r.key || r.ticker || "")}">
       ${iconSvg(r.icon, "cmd-result-icon")}
-      <span>${r.label}</span>
-      <span class="cmd-result-type">${r.type}</span>
+      <span>${escapeHtml(r.label)}</span>
+      <span class="cmd-result-type">${escapeHtml(r.type)}</span>
     </div>
   `).join("") || `<div class="cmd-result-item"><span>No results</span></div>`;
 }
@@ -2623,6 +2643,6 @@ document.body.addEventListener("click", (e) => {
   if (slot.innerHTML) {
     slot.innerHTML = "";
   } else {
-    slot.innerHTML = `<div class="why-popover">${btn.dataset.why}</div>`;
+    slot.innerHTML = `<div class="why-popover">${escapeHtml(btn.dataset.why)}</div>`;
   }
 });

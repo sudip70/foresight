@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
 
 from backend.app.ml.errors import ExplainabilityUnavailable
 from backend.app.ml.feature_groups import group_feature_values
@@ -79,6 +77,12 @@ def build_explanations(
     window_size: int,
     requested_targets: list[str] | None,
 ) -> list[TargetExplanation]:
+    try:
+        from sklearn.ensemble import RandomForestRegressor
+        from sklearn.model_selection import train_test_split
+    except ImportError as exc:  # pragma: no cover - slim deployment guard
+        raise ExplainabilityUnavailable("scikit-learn is not installed") from exc
+
     try:
         import shap
     except ImportError as exc:  # pragma: no cover - covered by health endpoint
