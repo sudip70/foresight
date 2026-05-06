@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 MAX_FORECAST_HORIZON_DAYS = 730
 MAX_FORECAST_WINDOW_SIZE = 756
-MAX_BACKTEST_STEPS = 756
+MAX_BACKTEST_STEPS = 252
 
 
 class HealthResponse(BaseModel):
@@ -189,6 +189,7 @@ class BacktestRequest(BaseModel):
     risk: float = Field(default=0.5, ge=0.0, le=1.0)
     window_size: int = Field(default=60, ge=2, le=MAX_FORECAST_WINDOW_SIZE)
     max_steps: int | None = Field(default=None, ge=1, le=MAX_BACKTEST_STEPS)
+    include_trade_log: bool = False
     strict_validation: bool = True
 
 

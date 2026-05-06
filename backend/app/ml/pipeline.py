@@ -2023,6 +2023,7 @@ class ForesightEngine:
         risk: float,
         window_size: int,
         max_steps: int,
+        include_trade_log: bool = False,
     ) -> BacktestResult:
         prices_all = self._combined_context["combined_prices"]
         if self.settings.meta_cash_enabled:
@@ -2109,15 +2110,16 @@ class ForesightEngine:
             trade_previous_weights = previous_weights
             turnover = float(np.sum(np.abs(weights - previous_weights)))
             transaction_cost = turnover * transaction_fee
-            trade_log.extend(
-                self._build_rebalance_trade_log(
-                    step=step,
-                    portfolio_value=portfolio_value,
-                    previous_weights=trade_previous_weights,
-                    target_weights=weights,
-                    transaction_fee=transaction_fee,
+            if include_trade_log:
+                trade_log.extend(
+                    self._build_rebalance_trade_log(
+                        step=step,
+                        portfolio_value=portfolio_value,
+                        previous_weights=trade_previous_weights,
+                        target_weights=weights,
+                        transaction_fee=transaction_fee,
+                    )
                 )
-            )
             actual_returns = (
                 prices_all[step + 1] - prices_all[step]
             ) / np.clip(prices_all[step], 1e-12, None)

@@ -227,7 +227,22 @@ def test_backtests_endpoint_returns_curves_and_metrics(client):
     assert payload["summary_metrics"]["ending_value"] > 0
     assert len(payload["equity_curve"]) == 9
     assert len(payload["drawdown_curve"]) == 9
-    assert payload["trade_log"]
+    assert payload["trade_log"] == []
+
+
+def test_backtests_can_include_trade_log_when_requested(client):
+    response = client.post(
+        "/api/backtests",
+        json={
+            "initial_amount": 10000,
+            "risk": 0.5,
+            "window_size": 5,
+            "max_steps": 8,
+            "include_trade_log": True,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["trade_log"]
 
 
 def test_lazy_artifact_engine_loads_backtests_in_background(tmp_path, monkeypatch):
@@ -315,7 +330,13 @@ def test_signal_policy_mode_keeps_lazy_backtests_available(tmp_path, monkeypatch
 def test_backtest_trade_log_matches_reported_turnover(client):
     response = client.post(
         "/api/backtests",
-        json={"initial_amount": 10000, "risk": 0.5, "window_size": 5, "max_steps": 8},
+        json={
+            "initial_amount": 10000,
+            "risk": 0.5,
+            "window_size": 5,
+            "max_steps": 8,
+            "include_trade_log": True,
+        },
     )
     assert response.status_code == 200
     payload = response.json()
