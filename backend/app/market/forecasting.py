@@ -143,13 +143,64 @@ class SupabaseForecastEngine:
     def __init__(self, repository: MarketDataRepository, settings: Settings) -> None:
         self.repository = repository
         self.settings = settings
-        self._market_forecast_cache: dict[tuple[int, int, str], list[dict[str, Any]]] = {}
-        self._macro_payload_cache: dict[str, Any] | None = None
-        self._universe_payload_cache: dict[str, Any] | None = None
-        self._ticker_rows_cache: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
+        self._market_forecast_cache: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+        self._macro_payload_cache: tuple[str, dict[str, Any]] | None = None
+        self._ticker_rows_cache: dict[
+            str,
+            tuple[tuple[str | None, str], dict[str, Any], list[dict[str, Any]]],
+        ] = {}
 
     def _cash_daily_return(self) -> float:
         return float((1.0 + self.settings.meta_cash_annual_return) ** (1.0 / 252.0) - 1.0)
+
+    def _latest_dates_signature(
+        self,
+        latest_dates: dict[str, str],
+    ) -> tuple[tuple[str, str], ...]:
+        return tuple(
+            sorted(
+                (str(ticker), str(latest_date))
+                for ticker, latest_date in latest_dates.items()
+            )
+        )
+
+    def _universe_signature(
+        self,
+        universe: list[dict[str, Any]],
+    ) -> tuple[tuple[str, str, str, str], ...]:
+        return tuple(
+            sorted(
+                (
+                    str(row.get("ticker") or ""),
+                    str(row.get("asset_class") or ""),
+                    str(row.get("display_name") or ""),
+                    str(row.get("min_history_days") or ""),
+                )
+                for row in universe
+            )
+        )
+
+    def _macro_cache_key(self, row: dict[str, Any] | None) -> str:
+        if row is None:
+            return ""
+        return json.dumps(row, sort_keys=True, default=str)
+
+    def _refresh_token(self) -> str:
+        try:
+            return self.repository.latest_refresh_token()
+        except AttributeError:
+            return ""
+
+    def _annualized_return_from_horizon(
+        self,
+        horizon_return: float,
+        horizon_days: int,
+    ) -> float:
+        if horizon_return <= -1.0:
+            return -1.0
+        return float(
+            (1.0 + horizon_return) ** (252.0 / max(int(horizon_days), 1)) - 1.0
+        )
 
     def _forecast_score(self, forecast: dict[str, Any], *, risk: float) -> float:
         risk_value = float(np.clip(risk, 0.0, 1.0))
@@ -167,12 +218,25 @@ class SupabaseForecastEngine:
             + (0.12 * confidence)
         )
 
-    def _ticker_rows(self, ticker: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    def _ticker_rows(
+        self,
+        ticker: str,
+        *,
+        latest_dates: dict[str, str] | None = None,
+        refresh_token: str | None = None,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         normalized = _normalize_ticker(ticker)
+        if latest_dates is None:
+            latest_dates = self.repository.latest_ohlcv_dates_by_ticker()
+        if refresh_token is None:
+            refresh_token = self._refresh_token()
+        current_latest_date = latest_dates.get(normalized)
+        current_cache_key = (current_latest_date, refresh_token)
         cached = self._ticker_rows_cache.get(normalized)
         if cached is not None:
-            metadata, rows = cached
-            return dict(metadata), [dict(row) for row in rows]
+            cached_key, metadata, rows = cached
+            if current_latest_date is not None and cached_key == current_cache_key:
+                return dict(metadata), [dict(row) for row in rows]
         metadata = self.repository.ticker_metadata(normalized)
         if metadata is None:
             raise ArtifactValidationError(f"Unsupported ticker: {ticker}")
@@ -181,7 +245,12 @@ class SupabaseForecastEngine:
             raise ArtifactValidationError(
                 f"Not enough Supabase market rows for {normalized}: {len(rows)}"
             )
-        self._ticker_rows_cache[normalized] = (dict(metadata), [dict(row) for row in rows])
+        latest_from_rows = str(rows[-1].get("date")) if rows else current_latest_date
+        self._ticker_rows_cache[normalized] = (
+            (latest_from_rows, refresh_token),
+            dict(metadata),
+            [dict(row) for row in rows],
+        )
         return metadata, rows
 
     def _prepare_price_series(self, rows: list[dict[str, Any]]) -> tuple[np.ndarray, list[str]]:
@@ -343,6 +412,7 @@ class SupabaseForecastEngine:
         annualized_volatility = _as_float(snapshot.get("volatility"))
         confidence = _as_float(snapshot.get("confidence"), 0.05)
         confidence_label = snapshot.get("confidence_label") or _confidence_label(confidence)
+        horizon_days = int(snapshot["horizon_days"])
         target_prices = {
             "bear": _as_float(snapshot.get("bear_target")),
             "base": _as_float(snapshot.get("base_target")),
@@ -359,15 +429,18 @@ class SupabaseForecastEngine:
             "latest_date": dates[-1],
             "forecast_start_date": forecast_start_date,
             "latest_price": _as_float(snapshot.get("latest_price"), float(prices[-1])),
-            "horizon_days": int(snapshot["horizon_days"]),
+            "horizon_days": horizon_days,
             "historical_prices": historical_prices,
             "forecast_paths": forecast_paths,
             "target_prices": target_prices,
             "returns": returns,
             "risk_metrics": {
                 "model_estimated_daily_return": _as_float(snapshot.get("base_return"))
-                / max(int(snapshot["horizon_days"]), 1),
-                "annualized_return": _as_float(snapshot.get("base_return")),
+                / max(horizon_days, 1),
+                "annualized_return": self._annualized_return_from_horizon(
+                    returns["base"],
+                    horizon_days,
+                ),
                 "annualized_volatility": annualized_volatility,
                 "max_historical_drawdown": max_drawdown,
                 "forecast_spread": max(returns["bull"] - returns["bear"], 0.0),
@@ -413,6 +486,7 @@ class SupabaseForecastEngine:
         annualized_volatility = _as_float(snapshot.get("volatility"))
         confidence = _as_float(snapshot.get("confidence"), 0.05)
         confidence_label = snapshot.get("confidence_label") or _confidence_label(confidence)
+        horizon_days = int(snapshot["horizon_days"])
         target_prices = {
             "bear": _as_float(snapshot.get("bear_target")),
             "base": _as_float(snapshot.get("base_target")),
@@ -424,13 +498,16 @@ class SupabaseForecastEngine:
             "latest_date": str(snapshot.get("as_of_date") or ""),
             "forecast_start_date": forecast_start_date,
             "latest_price": _as_float(snapshot.get("latest_price")),
-            "horizon_days": int(snapshot["horizon_days"]),
+            "horizon_days": horizon_days,
             "target_prices": target_prices,
             "returns": returns,
             "risk_metrics": {
                 "model_estimated_daily_return": _as_float(snapshot.get("base_return"))
-                / max(int(snapshot["horizon_days"]), 1),
-                "annualized_return": _as_float(snapshot.get("base_return")),
+                / max(horizon_days, 1),
+                "annualized_return": self._annualized_return_from_horizon(
+                    returns["base"],
+                    horizon_days,
+                ),
                 "annualized_volatility": annualized_volatility,
                 "max_historical_drawdown": max_drawdown,
                 "forecast_spread": max(returns["bull"] - returns["bear"], 0.0),
@@ -465,8 +542,14 @@ class SupabaseForecastEngine:
         window_size: int = 60,
         prefer_snapshot: bool = True,
         forecast_start_date: str | None = None,
+        latest_dates: dict[str, str] | None = None,
+        refresh_token: str | None = None,
     ) -> dict[str, Any]:
-        metadata, rows = self._ticker_rows(ticker)
+        metadata, rows = self._ticker_rows(
+            ticker,
+            latest_dates=latest_dates,
+            refresh_token=refresh_token,
+        )
         prices, dates = self._prepare_price_series(rows)
         forecast_start_date = forecast_start_date or _forecast_start_date()
         if prefer_snapshot:
@@ -628,8 +711,6 @@ class SupabaseForecastEngine:
         }
 
     def universe_payload(self) -> dict[str, Any]:
-        if self._universe_payload_cache is not None:
-            return self._universe_payload_cache
         universe = self.repository.list_universe()
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         all_tickers = []
@@ -668,7 +749,6 @@ class SupabaseForecastEngine:
                 "or guaranteed returns."
             ),
         }
-        self._universe_payload_cache = payload
         return payload
 
     def market_indices_payload(self) -> dict[str, Any]:
@@ -758,11 +838,14 @@ class SupabaseForecastEngine:
         )
 
     def _macro_payload(self) -> dict[str, Any]:
-        if self._macro_payload_cache is not None:
-            return self._macro_payload_cache
         row = self.repository.get_latest_macro_snapshot()
+        cache_key = self._macro_cache_key(row)
+        if self._macro_payload_cache is not None and self._macro_payload_cache[0] == cache_key:
+            return self._macro_payload_cache[1]
         if row is None:
-            return {"date": "", "global_regime": 1, "macro": []}
+            payload = {"date": "", "global_regime": 1, "macro": []}
+            self._macro_payload_cache = (cache_key, payload)
+            return payload
         fields = [
             ("VIX Market Volatility", "vix"),
             ("Federal Funds Rate", "federal_funds_rate"),
@@ -780,7 +863,7 @@ class SupabaseForecastEngine:
                 if row.get(key) is not None
             ],
         }
-        self._macro_payload_cache = payload
+        self._macro_payload_cache = (cache_key, payload)
         return payload
 
     def run_market_forecast(
@@ -792,10 +875,19 @@ class SupabaseForecastEngine:
         window_size: int = 60,
     ) -> dict[str, Any]:
         forecast_start_date = _forecast_start_date()
-        cache_key = (max(int(horizon_days), 1), max(int(window_size), 2), forecast_start_date)
+        universe = self.repository.list_universe()
+        latest_dates = self.repository.latest_ohlcv_dates_by_ticker()
+        refresh_token = self._refresh_token()
+        cache_key = (
+            max(int(horizon_days), 1),
+            max(int(window_size), 2),
+            forecast_start_date,
+            self._universe_signature(universe),
+            self._latest_dates_signature(latest_dates),
+            refresh_token,
+        )
         forecasts = [forecast.copy() for forecast in self._market_forecast_cache.get(cache_key, [])]
         if not forecasts:
-            universe = self.repository.list_universe()
             active_metadata = {row["ticker"]: row for row in universe}
             covered_tickers: set[str] = set()
             snapshots = self.repository.list_latest_forecast_snapshots(
@@ -804,7 +896,6 @@ class SupabaseForecastEngine:
                 include_paths=False,
             )
             if snapshots:
-                latest_dates = self.repository.latest_ohlcv_dates_by_ticker()
                 for snapshot in snapshots:
                     metadata = active_metadata.get(snapshot.get("ticker"))
                     if metadata is None:
@@ -839,6 +930,8 @@ class SupabaseForecastEngine:
                             window_size=window_size,
                             prefer_snapshot=False,
                             forecast_start_date=forecast_start_date,
+                            latest_dates=latest_dates,
+                            refresh_token=refresh_token,
                         )
                     )
                 except ArtifactValidationError:

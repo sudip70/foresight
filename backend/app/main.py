@@ -255,6 +255,17 @@ def _market_index_repository_proxy_payload(app: FastAPI) -> dict:
     return payload
 
 
+def _market_index_proxy_or_503(app: FastAPI, primary_error: Exception) -> dict:
+    try:
+        return _market_index_repository_proxy_payload(app)
+    except Exception as proxy_error:
+        detail = str(primary_error) or "Market index data is unavailable"
+        proxy_detail = str(proxy_error)
+        if proxy_detail and proxy_detail != detail:
+            detail = f"{detail}; Supabase proxy fallback unavailable: {proxy_detail}"
+        raise HTTPException(status_code=503, detail=detail) from proxy_error
+
+
 def _local_refresh_status_payload(app: FastAPI) -> dict:
     payload = empty_refresh_status()
     payload["message"] = "Using local artifact market data; Supabase refresh logs are not configured."
@@ -560,7 +571,7 @@ def create_app() -> FastAPI:
                 return _market_index_live_payload(app)
             except Exception as exc:  # pragma: no cover - provider/network defensive path
                 app.state.market_index_refresh_error = exc
-                return _market_index_repository_proxy_payload(app)
+                return _market_index_proxy_or_503(app, exc)
         try:
             payload = forecast_engine.market_indices_payload()
             if payload.get("indices"):
@@ -572,18 +583,15 @@ def create_app() -> FastAPI:
                 return _market_index_live_payload(app)
             except Exception as exc:  # pragma: no cover - provider/network defensive path
                 app.state.market_index_refresh_error = exc
-                return _market_index_repository_proxy_payload(app)
+                return _market_index_proxy_or_503(app, exc)
         except MarketDataUnavailable as exc:
             cache_payload = _market_index_cache_payload(app)
             if cache_payload["indices"]:
                 return cache_payload
             try:
                 return _market_index_live_payload(app)
-            except Exception:
-                try:
-                    return _market_index_repository_proxy_payload(app)
-                except Exception:
-                    raise HTTPException(status_code=503, detail=str(exc)) from exc
+            except Exception as live_exc:
+                return _market_index_proxy_or_503(app, live_exc)
         except Exception as exc:  # pragma: no cover - defensive
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -606,6 +614,7 @@ def create_app() -> FastAPI:
         if cache_key in history_cache:
             return history_cache[cache_key]
         repository = getattr(app.state, "market_repository", None)
+        repository_error: Exception | None = None
         if repository is not None:
             try:
                 payload = fetch_market_index_history_from_repository(
@@ -623,6 +632,9 @@ def create_app() -> FastAPI:
                         status_code=404,
                         detail=str(repository_exc),
                     ) from repository_exc
+                repository_error = repository_exc
+            except Exception as repository_exc:
+                repository_error = repository_exc
         try:
             payload = fetch_market_index_history(
                 settings,
@@ -643,6 +655,11 @@ def create_app() -> FastAPI:
             ):
                 raise HTTPException(status_code=503, detail=message) from exc
             raise HTTPException(status_code=400, detail=message) from exc
+        except Exception as exc:
+            detail = str(exc) or "Market index history is unavailable"
+            if repository_error is not None and str(repository_error):
+                detail = f"{detail}; Supabase proxy history unavailable: {repository_error}"
+            raise HTTPException(status_code=503, detail=detail) from exc
 
     @app.post(
         f"{settings.api_prefix}/portfolio/simulations",

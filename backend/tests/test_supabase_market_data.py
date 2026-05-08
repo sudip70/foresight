@@ -346,6 +346,155 @@ def test_market_forecast_ignores_stale_snapshots_and_recomputes_from_latest_hist
     ]
 
 
+def test_forecast_engine_refreshes_cached_ticker_rows_after_ohlcv_update():
+    repository = _seed_repository()
+    engine = SupabaseForecastEngine(repository, resettable_settings())
+
+    original = engine.run_ticker_forecast(ticker="AAA", horizon_days=30, window_size=20)
+    new_row = _ohlcv_rows("AAA", days=81)[-1]
+    new_row.update(
+        {
+            "close": 250.0,
+            "adjusted_close": 250.0,
+            "open": 249.0,
+            "high": 252.0,
+            "low": 248.0,
+        }
+    )
+    repository.upsert_ohlcv([new_row])
+
+    refreshed = engine.run_ticker_forecast(ticker="AAA", horizon_days=30, window_size=20)
+
+    assert original["latest_date"] == "2025-03-21"
+    assert refreshed["latest_date"] == new_row["date"]
+    assert refreshed["latest_price"] == 250.0
+
+
+def test_forecast_engine_refreshes_same_date_rows_after_refresh_run_changes():
+    repository = _seed_repository()
+    engine = SupabaseForecastEngine(repository, resettable_settings())
+
+    original = engine.run_ticker_forecast(ticker="AAA", horizon_days=30, window_size=20)
+    revised_latest_row = _ohlcv_rows("AAA", days=80)[-1]
+    revised_latest_row.update(
+        {
+            "close": 275.0,
+            "adjusted_close": 275.0,
+            "open": 274.0,
+            "high": 277.0,
+            "low": 273.0,
+        }
+    )
+    repository.upsert_ohlcv([revised_latest_row])
+    repository.upsert_refresh_run(
+        {
+            "id": "same-date-refresh",
+            "provider": "fake",
+            "status": "completed",
+            "started_at": "2025-03-22T13:35:00Z",
+            "finished_at": "2025-03-22T13:36:00Z",
+        }
+    )
+
+    refreshed = engine.run_ticker_forecast(ticker="AAA", horizon_days=30, window_size=20)
+
+    assert original["latest_date"] == revised_latest_row["date"]
+    assert original["latest_price"] != 275.0
+    assert refreshed["latest_date"] == revised_latest_row["date"]
+    assert refreshed["latest_price"] == 275.0
+
+
+def test_market_forecast_cache_refreshes_after_ohlcv_update():
+    repository = _seed_repository()
+    engine = SupabaseForecastEngine(repository, resettable_settings())
+
+    original = engine.run_market_forecast(horizon_days=30, window_size=20, risk=0.5, top_n=10)
+    new_row = _ohlcv_rows("AAA", days=81)[-1]
+    new_row.update(
+        {
+            "close": 300.0,
+            "adjusted_close": 300.0,
+            "open": 299.0,
+            "high": 302.0,
+            "low": 298.0,
+        }
+    )
+    repository.upsert_ohlcv([new_row])
+
+    refreshed = engine.run_market_forecast(horizon_days=30, window_size=20, risk=0.5, top_n=10)
+    original_by_ticker = {row["ticker"]: row for row in original["ranked_tickers"]}
+    refreshed_by_ticker = {row["ticker"]: row for row in refreshed["ranked_tickers"]}
+
+    assert original_by_ticker["AAA"]["latest_date"] == "2025-03-21"
+    assert refreshed_by_ticker["AAA"]["latest_date"] == new_row["date"]
+    assert refreshed_by_ticker["AAA"]["latest_price"] == 300.0
+
+
+def test_universe_and_macro_payloads_refresh_after_repository_updates():
+    repository = _seed_repository()
+    repository.upsert_macro(
+        [
+            {
+                "date": "2025-03-21",
+                "vix": 18.0,
+                "federal_funds_rate": 4.0,
+                "treasury_10y": 4.2,
+                "unemployment_rate": 4.1,
+                "cpi_all_items": 320.0,
+                "recession_indicator": 0.0,
+                "provider": "fake",
+            }
+        ]
+    )
+    engine = SupabaseForecastEngine(repository, resettable_settings())
+
+    original_universe = engine.universe_payload()
+    original_market = engine.run_market_forecast(
+        horizon_days=30,
+        window_size=20,
+        risk=0.5,
+        top_n=10,
+    )
+    repository.upsert_universe(
+        [
+            {
+                **_assets()[0],
+                "ticker": "CCC",
+                "display_name": "CCC Corp",
+                "provider_symbol": "CCC",
+                "active": True,
+            }
+        ]
+    )
+    repository.upsert_macro(
+        [
+            {
+                "date": "2025-03-22",
+                "vix": 19.0,
+                "federal_funds_rate": 4.0,
+                "treasury_10y": 4.2,
+                "unemployment_rate": 4.1,
+                "cpi_all_items": 320.0,
+                "recession_indicator": 0.0,
+                "provider": "fake",
+            }
+        ]
+    )
+
+    refreshed_universe = engine.universe_payload()
+    refreshed_market = engine.run_market_forecast(
+        horizon_days=30,
+        window_size=20,
+        risk=0.5,
+        top_n=10,
+    )
+
+    assert "CCC" not in {row["ticker"] for row in original_universe["tickers"]}
+    assert "CCC" in {row["ticker"] for row in refreshed_universe["tickers"]}
+    assert original_market["macro_snapshot"]["date"] == "2025-03-21"
+    assert refreshed_market["macro_snapshot"]["date"] == "2025-03-22"
+
+
 def test_market_forecast_fills_tickers_missing_from_partial_snapshot_cache():
     repository = InMemoryMarketDataRepository()
     repository.upsert_universe(
@@ -386,6 +535,10 @@ def test_market_forecast_fills_tickers_missing_from_partial_snapshot_cache():
     assert by_ticker["CCC"]["source"] == "supabase_forecast_snapshot"
     assert by_ticker["AAA"]["source"] == "supabase_ohlcv"
     assert by_ticker["BBB"]["source"] == "supabase_ohlcv"
+    expected_annualized = (
+        (1.0 + by_ticker["CCC"]["returns"]["base"]) ** (252.0 / 30.0)
+    ) - 1.0
+    assert abs(by_ticker["CCC"]["risk_metrics"]["annualized_return"] - expected_annualized) < 1e-12
 
 
 def test_refresh_job_logs_partial_failure_and_precomputes_forecasts():
@@ -433,6 +586,8 @@ def test_forecast_engine_uses_stored_snapshot_for_default_horizon():
     assert stored["forecast_start_date"] == today
     assert stored["forecast_paths"]["base"][0]["date"] == today
     assert stored["latest_date"] == repository.coverage_for_ticker("AAA")["latest_date"]
+    expected_annualized = ((1.0 + stored["returns"]["base"]) ** (252.0 / 30.0)) - 1.0
+    assert abs(stored["risk_metrics"]["annualized_return"] - expected_annualized) < 1e-12
 
 
 def test_forecast_engine_ignores_snapshot_that_does_not_match_latest_market_date():
@@ -567,6 +722,63 @@ def test_market_indices_fall_back_to_supabase_proxy_history(tmp_path, monkeypatc
         assert payload["source"] == "supabase_proxy"
         assert payload["provider_symbol"] == "SPY"
         assert payload["summary"]["points"] > 1
+
+    reset_settings()
+    reset_engine()
+
+
+def test_market_indices_provider_failure_without_repository_returns_503(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "missing-artifacts"
+    dataset_root = tmp_path / "datasets"
+    dataset_root.mkdir()
+
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_LOAD_ARTIFACT_ENGINE", "false")
+    monkeypatch.setattr(app_main, "build_market_repository", lambda settings: None)
+    monkeypatch.setattr(
+        app_main,
+        "fetch_market_index_snapshots",
+        lambda settings, repository=None: (_ for _ in ()).throw(ValueError("provider failed")),
+    )
+    reset_settings()
+    reset_engine()
+
+    with TestClient(app_main.create_app(), raise_server_exceptions=False) as client:
+        response = client.get("/api/market/indices")
+
+    assert response.status_code == 503
+    assert "provider failed" in response.json()["detail"]
+    assert "Supabase proxy fallback unavailable" in response.json()["detail"]
+
+    reset_settings()
+    reset_engine()
+
+
+def test_market_index_history_provider_exception_returns_503(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "missing-artifacts"
+    dataset_root = tmp_path / "datasets"
+    dataset_root.mkdir()
+
+    monkeypatch.setenv("FORESIGHT_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setenv("FORESIGHT_DATASET_ROOT", str(dataset_root))
+    monkeypatch.setenv("FORESIGHT_LOAD_ARTIFACT_ENGINE", "false")
+    monkeypatch.setattr(app_main, "build_market_repository", lambda settings: None)
+    monkeypatch.setattr(
+        app_main,
+        "fetch_market_index_history",
+        lambda settings, *, symbol, history_range: (_ for _ in ()).throw(
+            RuntimeError("provider exploded")
+        ),
+    )
+    reset_settings()
+    reset_engine()
+
+    with TestClient(app_main.create_app(), raise_server_exceptions=False) as client:
+        response = client.get("/api/market/indices/SP500/history?range=1y")
+
+    assert response.status_code == 503
+    assert "provider exploded" in response.json()["detail"]
 
     reset_settings()
     reset_engine()

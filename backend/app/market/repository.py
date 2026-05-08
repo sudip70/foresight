@@ -64,6 +64,8 @@ class MarketDataRepository(Protocol):
 
     def latest_ohlcv_dates_by_ticker(self) -> dict[str, str]: ...
 
+    def latest_refresh_token(self) -> str: ...
+
     def get_latest_profile(self, ticker: str) -> dict[str, Any] | None: ...
 
     def get_latest_macro_snapshot(self) -> dict[str, Any] | None: ...
@@ -370,6 +372,22 @@ class SupabaseMarketDataRepository:
             latest.setdefault(str(row["ticker"]), str(row["date"]))
         return latest
 
+    def latest_refresh_token(self) -> str:
+        rows = self._get(
+            "refresh_runs",
+            {
+                "select": "id,status,started_at,finished_at",
+                "order": "started_at.desc",
+                "limit": "1",
+            },
+        )
+        if not rows:
+            return ""
+        row = rows[0]
+        return "|".join(
+            str(row.get(key) or "") for key in ("id", "status", "started_at", "finished_at")
+        )
+
     def get_latest_profile(self, ticker: str) -> dict[str, Any] | None:
         rows = self._get(
             "asset_profile_snapshots",
@@ -614,6 +632,15 @@ class InMemoryMarketDataRepository:
         ):
             latest.setdefault(str(row["ticker"]), str(row["date"]))
         return latest
+
+    def latest_refresh_token(self) -> str:
+        runs = sorted(self.tables["refresh_runs"], key=lambda row: row["started_at"])
+        if not runs:
+            return ""
+        row = runs[-1]
+        return "|".join(
+            str(row.get(key) or "") for key in ("id", "status", "started_at", "finished_at")
+        )
 
     def get_latest_profile(self, ticker: str) -> dict[str, Any] | None:
         normalized = _normalize_ticker(ticker)
