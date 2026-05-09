@@ -49,6 +49,8 @@ import {
   selectedWindowSize,
 } from "./utils/validation.js";
 
+let appStarted = false;
+
 function setLearnMode(enabled) {
   state.learnMode = Boolean(enabled);
   document.body.classList.toggle("learn-mode", state.learnMode);
@@ -660,6 +662,33 @@ document.querySelectorAll("[data-close-details]").forEach((button) => {
   });
 });
 
+function startApp() {
+  if (appStarted) return;
+  appStarted = true;
+  elements.apiBase.value = state.apiBase;
+  elements.riskValue.textContent = Number(elements.risk.value).toFixed(2);
+  syncHorizonControls(elements.horizon.value);
+  syncWindowControls(elements.windowSize.value);
+  setLearnMode(state.learnMode);
+  setThemeMode(state.themeMode);
+  renderPortfolioLearning();
+  renderProjectStory();
+  renderGlossary();
+  probeBackend();
+}
+
+function acceptLegalDisclaimer() {
+  elements.legalDisclaimer?.setAttribute("hidden", "");
+  elements.legalDisclaimer?.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("disclaimer-pending");
+  startApp();
+  const activeNav = [...document.querySelectorAll(".nav-item.is-active, .mobile-nav-item.is-active")]
+    .find((item) => item.offsetParent !== null);
+  activeNav?.focus();
+}
+
+elements.acceptDisclaimer?.addEventListener("click", acceptLegalDisclaimer);
+
 elements.saveApiBase.addEventListener("click", async () => {
   state.apiBase = canonicalApiBase(elements.apiBase.value) || defaultApiBase();
   elements.apiBase.value = state.apiBase;
@@ -700,16 +729,8 @@ elements.runBacktest.addEventListener("click", () =>
   runBacktest().catch((error) => showToast(error.message, "error")),
 );
 
-elements.apiBase.value = state.apiBase;
-elements.riskValue.textContent = Number(elements.risk.value).toFixed(2);
-syncHorizonControls(elements.horizon.value);
-syncWindowControls(elements.windowSize.value);
-setLearnMode(state.learnMode);
-setThemeMode(state.themeMode);
-renderPortfolioLearning();
-renderProjectStory();
-renderGlossary();
-probeBackend();
+startApp();
+elements.acceptDisclaimer?.focus();
 
 function completedProgressCount() {
   return Object.values(state.progress.actions).filter(Boolean).length;
@@ -887,6 +908,7 @@ document.getElementById("openCmdPalette")?.addEventListener("click", openCommand
 
 // ── Keyboard Shortcuts ──
 document.addEventListener("keydown", (e) => {
+  if (document.body.classList.contains("disclaimer-pending")) return;
   if (cmdOverlay?.classList.contains("is-open")) {
     if (e.key === "Escape") { closeCommandPalette(); return; }
     return;

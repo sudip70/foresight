@@ -289,6 +289,7 @@
 
 .portfolio-detail-grid {
   grid-template-columns: minmax(360px, 0.9fr) minmax(420px, 1.1fr);
+  align-items: start;
   margin-top: 24px;
   margin-bottom: 24px;
 }

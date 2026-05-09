@@ -208,7 +208,9 @@ export function renderAllocationWhy(result) {
     return;
   }
   elements.allocationWhy.innerHTML = explanations
-    .slice(0, 8)
+    .slice()
+    .sort((left, right) => Number(right.weight || 0) - Number(left.weight || 0))
+    .slice(0, 4)
     .map(
       (entry) => `
         <article class="why-allocation-card">

@@ -1,6 +1,8 @@
 import { initialApiBase } from "../api/endpoints.js";
 
 export const elements = {
+  legalDisclaimer: document.querySelector("#legalDisclaimer"),
+  acceptDisclaimer: document.querySelector("#acceptDisclaimer"),
   apiBase: document.querySelector("#apiBase"),
   apiStatus: document.querySelector("#apiStatus"),
   saveApiBase: document.querySelector("#saveApiBase"),

@@ -216,20 +216,20 @@ export function renderProjectStory() {
   if (elements.projectHighlights) {
     elements.projectHighlights.innerHTML = [
       lessonCard(
-        "Full-stack product thinking",
-        "The project connects a beginner-friendly interface to real backend APIs, Supabase market data, market index history, refresh jobs, and portfolio simulation logic.",
+        "Full-stack product architecture",
+        "The project connects a static frontend, modular FastAPI routers, Supabase market data, scheduled refresh jobs, market index history, and portfolio simulation logic.",
+      ),
+      lessonCard(
+        "Maintainable frontend",
+        "The JavaScript is split into API, state, chart, render, and utility modules, while CSS is organized into base, layout, forms, components, charts, responsive, and theme layers.",
       ),
       lessonCard(
         "ML system design",
-        `The backend exposes ${modelSurface}.`,
-      ),
-      lessonCard(
-        "Market data UX",
-        "The market overview now combines live index cards with selectable historical charts and moving-average context before showing model-ranked opportunities.",
+        `The backend exposes ${modelSurface}. Route groups are separated for health, market data, forecasts, portfolio simulation, inference, and diagnostics.`,
       ),
       lessonCard(
         "Education-first UX",
-        "Learn Mode reframes outputs as lessons: what the metric means, why it matters, and what risk to inspect next.",
+        "Learn Mode, compact simulator rationale, benchmark comparisons, and clear data-freshness indicators explain what the metric means, why it matters, and what risk to inspect next.",
       ),
     ].join("");
   }
@@ -247,11 +247,11 @@ export function renderProjectStory() {
       ),
       lessonCard(
         "Model limitations",
-        "The UI explicitly frames forecasts as educational estimates. It avoids promising returns and keeps scenario outputs separate from advice.",
+        "The UI frames forecasts as educational estimates, keeps scenario outputs separate from advice, and shows allocation rationale without presenting it as a recommendation.",
       ),
       lessonCard(
         "Validation story",
-        "The repo includes backend API tests, synthetic fixture artifacts, refresh diagnostics, and backtest metrics to support reliability conversations in interviews.",
+        "The repo includes backend API tests, syntax checks for split frontend modules, CSS integrity checks, synthetic fixture artifacts, refresh diagnostics, and backtest metrics to support deployment confidence.",
       ),
     ].join("");
   }

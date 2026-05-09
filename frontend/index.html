@@ -18,7 +18,7 @@
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   </head>
-  <body>
+  <body class="disclaimer-pending">
     <svg class="icon-sprite" aria-hidden="true" focusable="false">
       <symbol id="icon-market" viewBox="0 0 24 24">
         <path d="M4 19V9" />
@@ -94,6 +94,46 @@
         <path d="M15 9l-6 6" />
       </symbol>
     </svg>
+
+    <div
+      id="legalDisclaimer"
+      class="legal-disclaimer-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="legalDisclaimerTitle"
+      aria-describedby="legalDisclaimerBody"
+    >
+      <section class="legal-disclaimer-card" tabindex="-1">
+        <div class="legal-disclaimer-mark" aria-hidden="true">
+          <svg class="ui-icon" aria-hidden="true"><use href="#icon-info-circle"></use></svg>
+        </div>
+        <div>
+          <span class="eyebrow">Important notice</span>
+          <h1 id="legalDisclaimerTitle">Educational simulation only</h1>
+          <div id="legalDisclaimerBody" class="legal-disclaimer-body">
+            <p>
+              Foresight is an educational market simulation and analytics tool. The information,
+              forecasts, portfolio outputs, benchmark comparisons, and model-generated explanations
+              are provided for learning, research, and demonstration purposes only.
+            </p>
+            <p>
+              Nothing in this app is financial, investment, trading, tax, accounting, legal, or
+              fiduciary advice. The app does not recommend that you buy, sell, hold, or avoid any
+              security, asset, or strategy.
+            </p>
+            <p>
+              Forecasts are hypothetical model estimates based on available data and assumptions.
+              Markets are uncertain, results may be inaccurate or incomplete, and past performance
+              does not guarantee future results. You are responsible for your own decisions and
+              should consult a qualified professional before making financial decisions.
+            </p>
+          </div>
+          <button id="acceptDisclaimer" class="legal-disclaimer-accept" type="button">
+            I understand and accept
+          </button>
+        </div>
+      </section>
+    </div>
 
     <!-- Command Palette Overlay -->
     <div id="commandPalette" class="cmd-palette-overlay" aria-hidden="true">
@@ -609,11 +649,12 @@
           <div class="about-layout">
             <article class="surface about-project-card">
               <div>
-                <h2>Foresight is a full-stack market intelligence and financial literacy platform.</h2>
+                <h2>Foresight is a modular market intelligence and financial literacy platform.</h2>
                 <p>
-                  The app combines live market index history, market data refresh jobs, FastAPI
-                  inference routes, ML/RL allocation artifacts, scenario forecasting, backtests,
-                  explainability, and a polished frontend into one learning-oriented product.
+                  The app combines Supabase-backed market data, historical index charts, FastAPI
+                  route modules, scenario forecasting, portfolio simulation, compact allocation
+                  explanations, optional RL diagnostics, and a polished static frontend into one
+                  learning-oriented product.
                 </p>
               </div>
               <div id="projectStats" class="project-stats"></div>
@@ -670,14 +711,14 @@
                   <ul>
                     <li>yfinance OHLCV for equities, ETFs, crypto, and market indices</li>
                     <li>Configured universes from <code>config/asset_universe.v1.json</code> and <code>config/market_indices.v1.json</code></li>
-                    <li>Macro CSV inputs for model context</li>
+                    <li>Macro CSV inputs and stored forecast snapshots for model context</li>
                   </ul>
                 </section>
                 <section class="architecture-node">
                   <span class="architecture-step">02</span>
                   <h3>Refresh and storage</h3>
                   <ul>
-                    <li>Render cron runs <code>scripts/refresh_supabase_daily.sh</code> for daily Supabase updates</li>
+                    <li>GitHub Actions runs <code>scripts/refresh_supabase_daily.sh</code> for scheduled Supabase updates</li>
                     <li>Supabase stores market history, profiles, macro context, index snapshots, and forecasts</li>
                     <li>Market index snapshots can refresh on demand when the first cards are missing</li>
                   </ul>
@@ -686,18 +727,18 @@
                   <span class="architecture-step">03</span>
                   <h3>FastAPI model layer</h3>
                   <ul>
+                    <li>Routers split health, market, forecast, portfolio, inference, and diagnostic routes</li>
                     <li>Supabase forecast engine serves market overview, ticker profiles, forecasts, and simulations</li>
                     <li>Local artifact engine remains available for optional RL diagnostics and backtests</li>
-                    <li>Index endpoints serve latest cards and historical chart series</li>
                   </ul>
                 </section>
                 <section class="architecture-node">
                   <span class="architecture-step">04</span>
                   <h3>Learning frontend</h3>
                   <ul>
-                    <li>Static HTML/CSS/JS app calls the API directly</li>
-                    <li>Market overview combines index history, scenario rankings, and sentiment</li>
-                    <li>Learn Mode turns outputs into plain-language finance lessons</li>
+                    <li>JavaScript is split into API, state, chart, render, and utility modules</li>
+                    <li>CSS is split by base, layout, forms, components, charts, responsive, and themes</li>
+                    <li>Learn Mode, settings controls, and simulator rationale make outputs explainable</li>
                   </ul>
                 </section>
               </div>
@@ -707,7 +748,7 @@
                   <p>
                     Render runs with Supabase required through <code>SUPABASE_URL</code> and
                     <code>SUPABASE_SERVICE_ROLE_KEY</code>. Local development can still enable artifact
-                    fallback for offline diagnostics.
+                    fallback for offline diagnostics, RL allocation checks, and backtests.
                   </p>
                 </div>
                 <div>
@@ -715,7 +756,8 @@
                   <p>
                     <code>/api/market/indices</code>, <code>/api/market/indices/{symbol}/history</code>,
                     <code>/api/forecasts/ticker</code>, <code>/api/forecasts/market</code>, and portfolio simulation
-                    routes power the visible workflows.
+                    routes power the visible workflows. Artifact-backed inference and backtests stay behind
+                    the diagnostics panel.
                   </p>
                 </div>
               </div>
