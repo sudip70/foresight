@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 MAX_FORECAST_HORIZON_DAYS = 730
@@ -79,6 +79,8 @@ class TickerForecastResponse(BaseModel):
     data_as_of: str | None = None
     source: str | None = None
     snapshot_used: bool | None = None
+    forecast_change: dict[str, Any] | None = None
+    data_quality: dict[str, Any] | None = None
 
 
 class MarketForecastRequest(BaseModel):
@@ -122,12 +124,18 @@ class MarketIndexHistoryResponse(BaseModel):
 
 
 class PortfolioSimulationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     amount: float = Field(default=10000.0, gt=0)
     risk: float = Field(default=0.5, ge=0.0, le=1.0)
     horizon_days: int = Field(default=300, ge=1, le=MAX_FORECAST_HORIZON_DAYS)
     selected_tickers: list[str] | None = None
     window_size: int = Field(default=60, ge=2, le=MAX_FORECAST_WINDOW_SIZE)
     strict_validation: bool = True
+    max_crypto_weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    max_single_position_weight: float | None = Field(default=None, ge=0.01, le=1.0)
+    min_cash_weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    preferred_asset_classes: list[str] | None = None
 
 
 class PortfolioSimulationResponse(BaseModel):
@@ -141,6 +149,9 @@ class PortfolioSimulationResponse(BaseModel):
     trade_plan: list[dict[str, Any]]
     source_forecasts: list[dict[str, Any]]
     warnings: list[str]
+    benchmark_comparison: list[dict[str, Any]] | None = None
+    allocation_explanations: list[dict[str, Any]] | None = None
+    constraints_applied: dict[str, Any] | None = None
 
 
 class InferenceRequest(BaseModel):

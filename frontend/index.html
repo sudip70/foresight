@@ -175,6 +175,7 @@
               <span class="nav-label">Settings</span>
             </summary>
             <div class="settings-panel">
+              <button class="settings-close" type="button" aria-label="Close settings" data-close-details>&times;</button>
               <label for="apiBase">Backend URL</label>
               <input id="apiBase" type="url" placeholder="https://foresight-backend-a5qx.onrender.com" />
               <label for="windowSize">Estimator window</label>
@@ -207,6 +208,18 @@
               <p id="marketAsOf" class="muted">
                 Live index performance and ranked opportunity scan.
               </p>
+            </div>
+          </div>
+
+          <div id="freshnessBar" class="freshness-bar" role="status" aria-live="polite">
+            <div>
+              <span id="freshnessStatus" class="freshness-dot pending"></span>
+              <strong>Data freshness</strong>
+              <span id="freshnessLatest">Waiting for backend</span>
+            </div>
+            <div class="freshness-meta">
+              <span id="freshnessSource">Source pending</span>
+              <span id="freshnessStale">Coverage pending</span>
             </div>
           </div>
 
@@ -326,7 +339,7 @@
         </section>
 
         <section id="forecast" class="workspace view">
-          <div class="section-head with-actions sticky-head">
+          <div class="section-head with-actions">
             <div>
               <h1>Ticker forecast</h1>
               <p class="muted">
@@ -382,6 +395,11 @@
                 <h2>Key insights</h2>
                 <div id="tickerInsights" class="insight-list"></div>
               </article>
+
+              <article class="surface ticker-about-card">
+                <h2 id="tickerAboutTitle">About ticker</h2>
+                <div id="tickerNarrative" class="narrative"></div>
+              </article>
             </div>
 
             <aside class="forecast-side">
@@ -401,19 +419,20 @@
                 </div>
               </article>
               <article class="surface">
-                <h2>Company data</h2>
-                <div id="tickerProfile" class="profile-grid"></div>
+                <h2>Data confidence</h2>
+                <div id="tickerDataBadges" class="badge-row"></div>
+                <div id="forecastChange" class="change-panel"></div>
               </article>
               <article class="surface">
-                <h2 id="tickerAboutTitle">About ticker</h2>
-                <div id="tickerNarrative" class="narrative"></div>
+                <h2>Company data</h2>
+                <div id="tickerProfile" class="profile-grid"></div>
               </article>
             </aside>
           </div>
         </section>
 
         <section id="simulator" class="workspace view">
-          <div class="section-head with-actions sticky-head">
+          <div class="section-head with-actions">
             <div>
               <h1>Portfolio simulator</h1>
               <p class="muted">
@@ -425,6 +444,7 @@
               <details class="selection-menu">
                 <summary class="icon-button dots" aria-label="Optional ticker selection"></summary>
                 <div class="settings-panel selection-panel">
+                  <button class="settings-close" type="button" aria-label="Close ticker selection" data-close-details>&times;</button>
                   <label for="simulationTickers">Optional ticker selection</label>
                   <select id="simulationTickers" multiple size="8"></select>
                 </div>
@@ -456,7 +476,50 @@
                 <label for="horizon">Horizon (days)</label>
                 <input id="horizon" type="number" min="1" max="730" value="300" step="1" />
               </div>
+              <span class="control-divider" aria-hidden="true"></span>
+              <div class="control-field window-field">
+                <label for="windowSizeInline">Window</label>
+                <input id="windowSizeInline" type="number" min="2" max="756" value="60" step="1" />
+              </div>
               <button id="refreshDashboard" class="secondary-button">Refresh data</button>
+            </div>
+
+            <div class="constraint-section">
+              <div class="constraint-section-head">
+                <div>
+                  <span class="eyebrow">Portfolio constraints</span>
+                  <h2>Allocation guardrails</h2>
+                </div>
+              </div>
+              <div class="constraint-grid" aria-label="Portfolio constraints">
+                <div class="constraint-field">
+                  <label for="maxSinglePosition">Max single position</label>
+                  <div class="percent-input">
+                    <input id="maxSinglePosition" type="number" min="1" max="100" value="25" step="1" />
+                    <span>%</span>
+                  </div>
+                </div>
+                <div class="constraint-field">
+                  <label for="maxCryptoWeight">Max crypto</label>
+                  <div class="percent-input">
+                    <input id="maxCryptoWeight" type="number" min="0" max="100" value="35" step="1" />
+                    <span>%</span>
+                  </div>
+                </div>
+                <div class="constraint-field">
+                  <label for="minCashWeight">Min cash</label>
+                  <div class="percent-input">
+                    <input id="minCashWeight" type="number" min="0" max="100" value="2" step="1" />
+                    <span>%</span>
+                  </div>
+                </div>
+                <fieldset class="constraint-field class-preferences">
+                  <legend>Preferred classes</legend>
+                  <label><input id="preferStock" type="checkbox" value="stock" /> Stocks</label>
+                  <label><input id="preferEtf" type="checkbox" value="etf" /> ETFs</label>
+                  <label><input id="preferCrypto" type="checkbox" value="crypto" /> Crypto</label>
+                </fieldset>
+              </div>
             </div>
           </article>
 
@@ -493,6 +556,17 @@
             <article class="surface">
               <h2>Simulation example trades <span>(base scenario)</span></h2>
               <div id="simulationTrades" class="data-table"></div>
+            </article>
+          </div>
+
+          <div class="portfolio-detail-grid">
+            <article class="surface">
+              <h2>Benchmark comparison</h2>
+              <div id="benchmarkComparison" class="data-table"></div>
+            </article>
+            <article class="surface">
+              <h2>Why this allocation?</h2>
+              <div id="allocationWhy" class="allocation-explanations"></div>
             </article>
           </div>
 

@@ -83,6 +83,16 @@ class MarketDataRepository(Protocol):
         method_version: str = FORECAST_METHOD_VERSION,
     ) -> dict[str, Any] | None: ...
 
+    def get_previous_forecast_snapshot(
+        self,
+        *,
+        ticker: str,
+        horizon_days: int,
+        window_size: int,
+        before_as_of_date: str,
+        method_version: str = FORECAST_METHOD_VERSION,
+    ) -> dict[str, Any] | None: ...
+
     def list_latest_forecast_snapshots(
         self,
         *,
@@ -491,6 +501,30 @@ class SupabaseMarketDataRepository:
         )
         return rows[0] if rows else None
 
+    def get_previous_forecast_snapshot(
+        self,
+        *,
+        ticker: str,
+        horizon_days: int,
+        window_size: int,
+        before_as_of_date: str,
+        method_version: str = FORECAST_METHOD_VERSION,
+    ) -> dict[str, Any] | None:
+        rows = self._get(
+            "forecast_snapshots",
+            {
+                "select": FORECAST_SUMMARY_FIELDS,
+                "ticker": f"eq.{_normalize_ticker(ticker)}",
+                "horizon_days": f"eq.{int(horizon_days)}",
+                "window_size": f"eq.{int(window_size)}",
+                "method_version": f"eq.{method_version}",
+                "as_of_date": f"lt.{before_as_of_date}",
+                "order": "as_of_date.desc",
+                "limit": "1",
+            },
+        )
+        return rows[0] if rows else None
+
     def list_latest_forecast_snapshots(
         self,
         *,
@@ -744,6 +778,27 @@ class InMemoryMarketDataRepository:
             and int(row.get("horizon_days")) == int(horizon_days)
             and int(row.get("window_size")) == int(window_size)
             and row.get("method_version") == method_version
+        ]
+        return sorted(rows, key=lambda row: row["as_of_date"])[-1] if rows else None
+
+    def get_previous_forecast_snapshot(
+        self,
+        *,
+        ticker: str,
+        horizon_days: int,
+        window_size: int,
+        before_as_of_date: str,
+        method_version: str = FORECAST_METHOD_VERSION,
+    ) -> dict[str, Any] | None:
+        normalized = _normalize_ticker(ticker)
+        rows = [
+            row
+            for row in self.tables["forecast_snapshots"]
+            if row.get("ticker") == normalized
+            and int(row.get("horizon_days")) == int(horizon_days)
+            and int(row.get("window_size")) == int(window_size)
+            and row.get("method_version") == method_version
+            and str(row.get("as_of_date") or "") < str(before_as_of_date)
         ]
         return sorted(rows, key=lambda row: row["as_of_date"])[-1] if rows else None
 

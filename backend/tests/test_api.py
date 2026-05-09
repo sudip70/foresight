@@ -166,6 +166,45 @@ def test_portfolio_simulation_returns_forecast_driven_allocations(client):
     assert any(allocation["asset_class"] == "cash" for allocation in payload["asset_allocations"])
 
 
+def test_portfolio_simulation_constraints_apply_to_local_artifact_engine(client):
+    response = client.post(
+        "/api/portfolio/simulations",
+        json={
+            "amount": 10000,
+            "risk": 0.9,
+            "horizon_days": 60,
+            "window_size": 5,
+            "selected_tickers": ["AAPL", "MSFT", "BTC-USD", "ETH-USD", "SPY", "QQQ"],
+            "max_crypto_weight": 0.02,
+            "max_single_position_weight": 0.20,
+            "min_cash_weight": 0.50,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    class_allocations = {
+        allocation["asset_class"]: allocation for allocation in payload["class_allocations"]
+    }
+    assert class_allocations["cash"]["weight"] >= 0.50
+    assert class_allocations.get("crypto", {"weight": 0.0})["weight"] <= 0.020001
+    assert "min_cash_weight" in payload["constraints_applied"]["binding"]
+    assert "max_crypto_weight" in payload["constraints_applied"]["binding"]
+
+
+def test_portfolio_simulation_rejects_removed_exclude_ticker_field(client):
+    response = client.post(
+        "/api/portfolio/simulations",
+        json={
+            "amount": 10000,
+            "risk": 0.7,
+            "horizon_days": 60,
+            "window_size": 5,
+            "excluded_tickers": ["AAPL"],
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_inference_endpoint_returns_allocations_and_summary(client):
     response = client.post(
         "/api/inference",

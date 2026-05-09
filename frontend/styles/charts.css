@@ -1,0 +1,489 @@
+/* Charts and visualizations */
+
+.index-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+  margin-bottom: 28px;
+}
+
+.market-index-layout {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.75fr) minmax(0, 2.25fr);
+  align-items: stretch;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+
+.market-index-layout .index-strip {
+  grid-template-columns: 1fr;
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 20px;
+  margin-bottom: 0;
+}
+
+.index-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 100px;
+  gap: 10px;
+  min-height: 150px;
+  padding: 22px;
+}
+
+.market-index-layout .index-card {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  gap: 18px;
+  min-height: 0;
+  padding: 20px;
+}
+
+.market-index-layout .index-card > div {
+  min-width: 0;
+}
+
+.index-card span,
+.index-card small {
+  color: var(--muted);
+}
+
+.index-card strong {
+  display: block;
+  margin: 12px 0 8px;
+  font-size: 1.35rem;
+  line-height: 1.1;
+}
+
+.market-index-layout .index-card strong {
+  margin: 10px 0 6px;
+  font-size: 1.18rem;
+}
+
+.index-change {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-weight: 700;
+}
+
+.index-change span {
+  color: inherit;
+}
+
+.positive {
+  color: var(--accent);
+}
+
+.negative {
+  color: var(--danger);
+}
+
+.pending {
+  color: var(--warning-ink);
+}
+
+.sparkline {
+  align-self: end;
+  width: 104px;
+  height: 72px;
+}
+
+.market-index-layout .sparkline {
+  align-self: center;
+  justify-self: start;
+  width: 84px;
+  height: 58px;
+}
+
+.sparkline path {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sparkline .positive-line {
+  stroke: var(--accent);
+}
+
+.sparkline .negative-line {
+  stroke: var(--danger);
+}
+
+.market-index-history {
+  margin-bottom: 0;
+}
+
+.market-index-toolbar {
+  align-items: flex-start;
+}
+
+.market-index-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.market-index-controls select {
+  width: 260px;
+  max-width: 100%;
+}
+
+.market-index-controls .range-tabs {
+  width: auto;
+}
+
+.market-index-summary.metric-grid.compact {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.market-index-summary .metric {
+  min-height: 78px;
+  padding: 14px 16px;
+}
+
+.market-index-summary .metric h3 {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+  font-size: 0.76rem;
+}
+
+.market-index-summary .metric strong {
+  font-size: 1rem;
+}
+
+.market-index-summary .why-btn {
+  min-width: 18px;
+  min-height: 18px;
+  margin-left: 2px;
+  font-size: 0.62rem;
+}
+
+.market-index-chart-frame {
+  height: 360px;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 20px;
+}
+
+.metric-grid.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.metric-grid.highlights {
+  margin-bottom: 28px;
+}
+
+.metric {
+  min-height: 110px;
+  padding: 22px;
+}
+
+.metric h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 14px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.metric h3 .why-btn {
+  flex: 0 0 auto;
+  min-width: 20px;
+  min-height: 20px;
+  margin-left: 0;
+  font-size: 0.66rem;
+}
+
+.metric strong {
+  display: block;
+  font-size: 1.25rem;
+  line-height: 1.15;
+}
+
+.metric .metric-subtitle {
+  display: block;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+
+.chart-surface {
+  min-height: 550px;
+}
+
+.chart-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.range-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.range-button {
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  color: var(--label);
+  padding: 6px 12px;
+  font-size: 0.88rem;
+}
+
+.range-button:hover,
+.range-button.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 20px;
+  margin-bottom: 10px;
+  color: var(--label);
+  font-size: 0.84rem;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend-item::before {
+  content: "";
+  width: 22px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.legend-item.historical,
+.legend-item.base {
+  color: var(--accent);
+}
+
+.legend-item.bear {
+  color: var(--danger);
+}
+
+.legend-item.bull {
+  color: var(--blue);
+}
+
+.legend-item.moving-average {
+  color: var(--blue);
+}
+
+.legend-item.moving-average::before,
+.legend-item.base::before,
+.legend-item.bear::before,
+.legend-item.bull::before {
+  border-top: 2px dashed currentColor;
+  background: transparent;
+}
+
+.chart-frame {
+  position: relative;
+  width: 100%;
+  height: 430px;
+  margin-top: 10px;
+}
+
+#forecastChart,
+#marketIndexChart {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+
+.sentiment-card {
+  display: grid;
+  align-content: start;
+}
+
+.sentiment-gauge {
+  display: grid;
+  justify-items: center;
+  gap: 0;
+  margin-top: 16px;
+  margin-bottom: 20px;
+}
+
+.gauge-arc {
+  --gauge-deg: 108deg;
+  position: relative;
+  width: 260px;
+  height: 130px;
+  border-radius: 260px 260px 0 0;
+  background: conic-gradient(
+    from 270deg at 50% 100%,
+    var(--accent) 0deg var(--gauge-deg),
+    var(--gauge-track) var(--gauge-deg) 180deg,
+    transparent 180deg 360deg
+  );
+  cursor: pointer;
+  transition:
+    filter 160ms ease,
+    transform 160ms ease;
+}
+
+.gauge-arc::after {
+  content: "";
+  position: absolute;
+  left: 32px;
+  right: 32px;
+  bottom: 0;
+  height: 94px;
+  border-radius: 196px 196px 0 0;
+  background: var(--surface);
+}
+
+.sentiment-gauge:hover .gauge-arc {
+  filter: saturate(1.08);
+  transform: translateY(-2px);
+}
+
+.gauge-value {
+  margin-top: -50px;
+  z-index: 1;
+  color: var(--ink);
+}
+
+.gauge-value strong {
+  font-size: 2rem;
+}
+
+.gauge-value span {
+  color: var(--muted);
+}
+
+#sentimentLabel {
+  margin: 4px 0 0;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.sentiment-list {
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 18px;
+}
+
+.sentiment-list span {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--label);
+}
+
+.sentiment-list span:last-child {
+  border-bottom: 0;
+}
+
+
+.allocation-card {
+  display: grid;
+  align-content: start;
+}
+
+.allocation-view {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  justify-items: center;
+  align-items: center;
+  margin: 30px 0;
+}
+
+.allocation-donut {
+  --stock: 0%;
+  --etf: 0%;
+  --crypto: 0%;
+  --cash-start: 0%;
+  width: 178px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at center, var(--surface) 0 48%, transparent 49%),
+    conic-gradient(
+      var(--accent) 0 var(--stock),
+      var(--cyan) var(--stock) var(--etf),
+      var(--blue) var(--etf) var(--crypto),
+      var(--cash) var(--crypto) 100%
+    );
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition:
+    filter 160ms ease,
+    transform 160ms ease;
+}
+
+.allocation-donut:hover {
+  filter: saturate(1.08);
+  transform: translateY(-2px);
+}
+
+.allocation-donut strong {
+  display: block;
+  font-size: 1.5rem;
+}
+
+.allocation-donut span {
+  color: var(--muted);
+}
+
+.allocation-legend {
+  display: grid;
+  gap: 14px;
+  width: min(100%, 230px);
+}
+
+.legend-row {
+  display: grid;
+  grid-template-columns: 14px minmax(70px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.legend-dot.etf {
+  background: var(--cyan);
+}
+
+.legend-dot.crypto {
+  background: var(--blue);
+}
+
+.legend-dot.cash {
+  background: var(--cash);
+}

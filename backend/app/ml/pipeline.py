@@ -44,6 +44,119 @@ CASH_TICKER = "CASH"
 META_V3_PREFIX = "sac-meta-v3"
 
 
+def _normalize_ticker(ticker: str) -> str:
+    return str(ticker or "").strip().upper()
+
+
+def _portfolio_constraint_payload(
+    *,
+    max_crypto_weight: float | None,
+    max_single_position_weight: float | None,
+    min_cash_weight: float | None,
+    preferred_asset_classes: list[str] | None,
+) -> dict:
+    preferred = {
+        str(asset_class).strip().lower()
+        for asset_class in preferred_asset_classes or []
+        if str(asset_class).strip().lower() in {"stock", "etf", "crypto"}
+    }
+    return {
+        "max_crypto_weight": None
+        if max_crypto_weight is None
+        else float(np.clip(max_crypto_weight, 0.0, 1.0)),
+        "max_single_position_weight": None
+        if max_single_position_weight is None
+        else float(np.clip(max_single_position_weight, 0.01, 1.0)),
+        "min_cash_weight": None
+        if min_cash_weight is None
+        else float(np.clip(min_cash_weight, 0.0, 1.0)),
+        "preferred_asset_classes": sorted(preferred),
+        "binding": [],
+    }
+
+
+def _redistribute_weight_excess(
+    weights: np.ndarray,
+    caps: np.ndarray,
+    cash_weight: float,
+    *,
+    eligible: np.ndarray | None = None,
+) -> tuple[np.ndarray, float]:
+    adjusted = np.asarray(weights, dtype=float).copy()
+    cap_values = np.asarray(caps, dtype=float)
+    eligible_mask = (
+        np.ones_like(adjusted, dtype=bool)
+        if eligible is None
+        else np.asarray(eligible, dtype=bool)
+    )
+    for _ in range(20):
+        over = adjusted > cap_values
+        if not bool(np.any(over)):
+            break
+        excess = float(np.sum(adjusted[over] - cap_values[over]))
+        adjusted[over] = cap_values[over]
+        capacity = np.clip(cap_values - adjusted, 0.0, None)
+        capacity[~eligible_mask] = 0.0
+        capacity_sum = float(np.sum(capacity))
+        if excess <= 1e-12:
+            break
+        if capacity_sum <= 1e-12:
+            cash_weight += excess
+            break
+        adjusted += excess * (capacity / capacity_sum)
+    return adjusted, cash_weight
+
+
+def _apply_portfolio_weight_constraints(
+    *,
+    chosen: list[dict],
+    risky_weights: np.ndarray,
+    cash_weight: float,
+    max_single_position_weight: float,
+    max_crypto_weight: float | None,
+    constraints: dict,
+) -> tuple[np.ndarray, float]:
+    weights = np.asarray(risky_weights, dtype=float)
+    caps = np.full_like(weights, max_single_position_weight, dtype=float)
+    if (
+        constraints.get("max_single_position_weight") is not None
+        and bool(np.any(weights > caps + 1e-9))
+    ):
+        constraints["binding"].append("max_single_position_weight")
+    weights, cash_weight = _redistribute_weight_excess(weights, caps, cash_weight)
+    if max_crypto_weight is not None:
+        crypto_mask = np.asarray(
+            [forecast.get("asset_class") == "crypto" for forecast in chosen],
+            dtype=bool,
+        )
+        crypto_weight = float(np.sum(weights[crypto_mask]))
+        if crypto_weight > max_crypto_weight + 1e-9:
+            constraints["binding"].append("max_crypto_weight")
+            excess = crypto_weight - max_crypto_weight
+            weights[crypto_mask] *= max_crypto_weight / max(crypto_weight, 1e-12)
+            non_crypto = ~crypto_mask
+            capacity = np.clip(caps - weights, 0.0, None)
+            capacity[~non_crypto] = 0.0
+            capacity_sum = float(np.sum(capacity))
+            if capacity_sum <= 1e-12:
+                cash_weight += excess
+            else:
+                weights += excess * (capacity / capacity_sum)
+            weights, cash_weight = _redistribute_weight_excess(
+                weights,
+                caps,
+                cash_weight,
+                eligible=non_crypto,
+            )
+    total = float(np.sum(weights) + cash_weight)
+    if total > 1.0 + 1e-9:
+        scale = max((1.0 - cash_weight) / max(float(np.sum(weights)), 1e-12), 0.0)
+        weights *= scale
+    elif total < 1.0 - 1e-9:
+        cash_weight += 1.0 - total
+    return weights, float(cash_weight)
+
+
 MACRO_FEATURE_NAMES = [
     "vix_market_volatility",
     "federal_funds_rate",
@@ -991,10 +1104,29 @@ class ForesightEngine:
         horizon_days: int,
         selected_tickers: list[str] | None = None,
         window_size: int = 60,
+        max_crypto_weight: float | None = None,
+        max_single_position_weight: float | None = None,
+        min_cash_weight: float | None = None,
+        preferred_asset_classes: list[str] | None = None,
     ) -> dict:
         risk_value = float(np.clip(risk, 0.0, 1.0))
+        constraints = _portfolio_constraint_payload(
+            max_crypto_weight=max_crypto_weight,
+            max_single_position_weight=max_single_position_weight,
+            min_cash_weight=min_cash_weight,
+            preferred_asset_classes=preferred_asset_classes,
+        )
+        preferred = set(constraints["preferred_asset_classes"])
+        constraint_warnings = []
         if selected_tickers:
             forecast_start_date = date.today().isoformat()
+            normalized_selected = [
+                _normalize_ticker(ticker)
+                for ticker in selected_tickers
+                if str(ticker).strip()
+            ]
+            if not normalized_selected:
+                raise ArtifactValidationError("No selected tickers were provided")
             forecasts = [
                 self._ticker_forecast_payload(
                     ticker=ticker,
@@ -1002,10 +1134,14 @@ class ForesightEngine:
                     window_size=window_size,
                     forecast_start_date=forecast_start_date,
                 )
-                for ticker in selected_tickers
+                for ticker in normalized_selected
             ]
             for forecast in forecasts:
-                forecast["opportunity_score"] = self._forecast_score(forecast, risk=risk_value)
+                score = self._forecast_score(forecast, risk=risk_value)
+                if forecast.get("asset_class") in preferred:
+                    score += 0.04 + (0.08 * max(abs(score), 0.01))
+                    forecast["preference_boosted"] = True
+                forecast["opportunity_score"] = float(score)
             ranked = sorted(forecasts, key=lambda entry: entry["opportunity_score"], reverse=True)
         else:
             ranked = self.run_market_forecast(
@@ -1014,6 +1150,21 @@ class ForesightEngine:
                 top_n=1000,
                 window_size=window_size,
             )["ranked_tickers"]
+            ranked = [dict(forecast) for forecast in ranked]
+            for forecast in ranked:
+                if forecast.get("asset_class") in preferred:
+                    score = float(forecast["opportunity_score"])
+                    forecast["opportunity_score"] = float(
+                        score + 0.04 + (0.08 * max(abs(score), 0.01))
+                    )
+                    forecast["preference_boosted"] = True
+            if preferred:
+                constraint_warnings.append(
+                    "Preferred asset classes received a ranking boost: "
+                    + ", ".join(sorted(preferred))
+                    + "."
+                )
+            ranked = sorted(ranked, key=lambda entry: entry["opportunity_score"], reverse=True)
             ranked = select_diversified_simulation_forecasts(
                 ranked,
                 risk=risk_value,
@@ -1043,8 +1194,19 @@ class ForesightEngine:
         cash_weight = float(np.clip(0.28 - (0.23 * risk_value), 0.02, 0.35))
         if float(np.mean([forecast["returns"]["base"] for forecast in chosen])) < cash_return:
             cash_weight = min(0.45, cash_weight + 0.12)
+        if constraints["min_cash_weight"] is not None and cash_weight < constraints["min_cash_weight"]:
+            cash_weight = float(constraints["min_cash_weight"])
+            constraints["binding"].append("min_cash_weight")
         risky_budget = max(1.0 - cash_weight, 0.0)
-        max_asset_weight = 0.18 + (0.07 * risk_value)
+        default_max_asset_weight = 0.18 + (0.07 * risk_value)
+        max_asset_weight = float(
+            min(
+                default_max_asset_weight,
+                constraints["max_single_position_weight"]
+                if constraints["max_single_position_weight"] is not None
+                else default_max_asset_weight,
+            )
+        )
         risky_weights = allocate_simulation_risky_weights(
             chosen,
             raw_scores,
@@ -1052,14 +1214,20 @@ class ForesightEngine:
             risk=risk_value,
             max_asset_weight=max_asset_weight,
         )
+        risky_weights, cash_weight = _apply_portfolio_weight_constraints(
+            chosen=chosen,
+            risky_weights=risky_weights,
+            cash_weight=cash_weight,
+            max_single_position_weight=max_asset_weight,
+            max_crypto_weight=constraints["max_crypto_weight"],
+            constraints=constraints,
+        )
 
         allocations = []
-        bear_return = cash_weight * cash_return
-        base_return = cash_weight * cash_return
-        bull_return = cash_weight * cash_return
-        confidence_values = []
         for weight, forecast in zip(risky_weights, chosen):
             weight_value = float(weight)
+            if weight_value <= 1e-9:
+                continue
             allocations.append(
                 {
                     "ticker": forecast["ticker"],
@@ -1072,10 +1240,6 @@ class ForesightEngine:
                     "confidence": float(forecast["confidence"]),
                 }
             )
-            bear_return += weight_value * float(forecast["returns"]["bear"])
-            base_return += weight_value * float(forecast["returns"]["base"])
-            bull_return += weight_value * float(forecast["returns"]["bull"])
-            confidence_values.append(float(forecast["confidence"]))
 
         if cash_weight > 1e-9:
             allocations.append(
@@ -1090,13 +1254,22 @@ class ForesightEngine:
                     "confidence": 0.95,
                 }
             )
-            confidence_values.append(0.95)
 
         total_weight = sum(allocation["weight"] for allocation in allocations)
         if total_weight > 1e-12:
             for allocation in allocations:
                 allocation["weight"] = float(allocation["weight"] / total_weight)
                 allocation["amount"] = float(allocation["weight"] * amount)
+        bear_return = sum(
+            allocation["weight"] * allocation["bear_return"] for allocation in allocations
+        )
+        base_return = sum(
+            allocation["weight"] * allocation["base_return"] for allocation in allocations
+        )
+        bull_return = sum(
+            allocation["weight"] * allocation["bull_return"] for allocation in allocations
+        )
+        confidence_values = [float(allocation["confidence"]) for allocation in allocations]
 
         class_weights: dict[str, float] = {}
         for allocation in allocations:
@@ -1126,11 +1299,26 @@ class ForesightEngine:
         warnings = [
             "Forecasts are estimates and should be reviewed before making investment decisions."
         ]
+        warnings.extend(constraint_warnings)
+        if constraints["binding"]:
+            warnings.append(
+                "Portfolio constraints changed the final weights: "
+                + ", ".join(sorted(set(constraints["binding"])))
+                + "."
+            )
         if max(allocation["weight"] for allocation in allocations) > 0.24:
             warnings.append("One position is above 24%, so concentration risk is elevated.")
         if float(np.mean(confidence_values)) < 0.45:
             warnings.append("Average forecast confidence is low because the scenario band is wide.")
-        if cash_weight < 0.03 and risk_value < 0.95:
+        final_cash_weight = next(
+            (
+                float(allocation["weight"])
+                for allocation in allocations
+                if allocation["ticker"] == CASH_TICKER
+            ),
+            0.0,
+        )
+        if final_cash_weight < 0.03 and risk_value < 0.95:
             warnings.append("Cash is very low for a non-maximum risk setting.")
 
         return {
@@ -1152,6 +1340,7 @@ class ForesightEngine:
             "trade_plan": trade_plan,
             "source_forecasts": chosen,
             "warnings": warnings,
+            "constraints_applied": constraints,
         }
 
     def _class_ranges(self) -> dict[str, tuple[int, int]]:

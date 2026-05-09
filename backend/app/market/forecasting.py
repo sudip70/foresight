@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import json
 import math
 from typing import Any
@@ -217,6 +217,132 @@ class SupabaseForecastEngine:
             - ((0.15 + (0.20 * (1.0 - risk_value))) * volatility)
             + (0.12 * confidence)
         )
+
+    def _data_quality_payload(
+        self,
+        forecast: dict[str, Any],
+        *,
+        row_count: int | None = None,
+    ) -> dict[str, Any]:
+        as_of_date = str(forecast.get("data_as_of") or forecast.get("latest_date") or "")
+        days_old: int | None = None
+        if as_of_date:
+            try:
+                days_old = max((date.today() - date.fromisoformat(as_of_date)).days, 0)
+            except ValueError:
+                try:
+                    normalized_date = as_of_date.replace("Z", "+00:00")
+                    days_old = max(
+                        (
+                            date.today()
+                            - datetime.fromisoformat(normalized_date).date()
+                        ).days,
+                        0,
+                    )
+                except ValueError:
+                    days_old = None
+        if days_old is None:
+            freshness_label = "Unknown"
+        elif days_old <= 5:
+            freshness_label = "Fresh"
+        elif days_old <= 10:
+            freshness_label = "Delayed"
+        else:
+            freshness_label = "Stale"
+        return {
+            "as_of_date": as_of_date or None,
+            "days_old": days_old,
+            "freshness_label": freshness_label,
+            "source": forecast.get("source"),
+            "snapshot_used": bool(forecast.get("snapshot_used")),
+            "history_rows": row_count,
+            "confidence": forecast.get("confidence"),
+            "confidence_label": forecast.get("confidence_label"),
+        }
+
+    def _forecast_change_payload(
+        self,
+        *,
+        current: dict[str, Any],
+        previous_snapshot: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if previous_snapshot is None:
+            return {
+                "available": False,
+                "label": "No prior stored forecast",
+                "current_as_of": current.get("latest_date") or current.get("data_as_of"),
+                "previous_as_of": None,
+            }
+        base_delta = float(current["returns"]["base"]) - _as_float(
+            previous_snapshot.get("base_return")
+        )
+        direction = "flat"
+        if base_delta > 0.0025:
+            direction = "up"
+        elif base_delta < -0.0025:
+            direction = "down"
+        return {
+            "available": True,
+            "direction": direction,
+            "current_as_of": current.get("latest_date") or current.get("data_as_of"),
+            "previous_as_of": previous_snapshot.get("as_of_date"),
+            "base_return_delta": base_delta,
+            "bear_return_delta": float(current["returns"]["bear"])
+            - _as_float(previous_snapshot.get("bear_return")),
+            "bull_return_delta": float(current["returns"]["bull"])
+            - _as_float(previous_snapshot.get("bull_return")),
+            "confidence_delta": float(current.get("confidence") or 0.0)
+            - _as_float(previous_snapshot.get("confidence")),
+            "base_target_delta": float(current["target_prices"]["base"])
+            - _as_float(previous_snapshot.get("base_target")),
+            "label": "Base return improved"
+            if direction == "up"
+            else "Base return weakened"
+            if direction == "down"
+            else "Base return is stable",
+        }
+
+    def _previous_forecast_snapshot(
+        self,
+        *,
+        ticker: str,
+        horizon_days: int,
+        window_size: int,
+        before_as_of_date: str,
+    ) -> dict[str, Any] | None:
+        try:
+            return self.repository.get_previous_forecast_snapshot(
+                ticker=ticker,
+                horizon_days=horizon_days,
+                window_size=window_size,
+                before_as_of_date=before_as_of_date,
+            )
+        except AttributeError:
+            return None
+
+    def _attach_forecast_context(
+        self,
+        forecast: dict[str, Any],
+        *,
+        row_count: int | None,
+        horizon_days: int,
+        window_size: int,
+    ) -> dict[str, Any]:
+        previous = self._previous_forecast_snapshot(
+            ticker=str(forecast["ticker"]),
+            horizon_days=horizon_days,
+            window_size=window_size,
+            before_as_of_date=str(forecast.get("latest_date") or forecast.get("data_as_of") or ""),
+        )
+        forecast["forecast_change"] = self._forecast_change_payload(
+            current=forecast,
+            previous_snapshot=previous,
+        )
+        forecast["data_quality"] = self._data_quality_payload(
+            forecast,
+            row_count=row_count,
+        )
+        return forecast
 
     def _ticker_rows(
         self,
@@ -559,11 +685,17 @@ class SupabaseForecastEngine:
                 window_size=window_size,
             )
             if snapshot is not None and str(snapshot.get("as_of_date")) == dates[-1]:
-                return self._payload_from_snapshot(
+                payload = self._payload_from_snapshot(
                     metadata=metadata,
                     rows=rows,
                     snapshot=snapshot,
                     forecast_start_date=forecast_start_date,
+                )
+                return self._attach_forecast_context(
+                    payload,
+                    row_count=len(rows),
+                    horizon_days=horizon_days,
+                    window_size=window_size,
                 )
 
         asset_class = metadata["asset_class"]
@@ -651,7 +783,7 @@ class SupabaseForecastEngine:
             for date_value, price_value in zip(dates[-history_count:], prices[-history_count:])
         ]
         forecast_paths = {"bear": bear_path, "base": base_path, "bull": bull_path}
-        return {
+        payload = {
             "ticker": metadata["ticker"],
             "asset_class": asset_class,
             "latest_date": latest_date,
@@ -688,6 +820,12 @@ class SupabaseForecastEngine:
             "source": "supabase_ohlcv",
             "snapshot_used": False,
         }
+        return self._attach_forecast_context(
+            payload,
+            row_count=len(rows),
+            horizon_days=horizon_days,
+            window_size=window_size,
+        )
 
     def forecast_snapshot_row(self, forecast: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -904,10 +1042,15 @@ class SupabaseForecastEngine:
                     if latest_date and str(snapshot.get("as_of_date")) != latest_date:
                         continue
                     forecasts.append(
-                        self._market_payload_from_snapshot(
-                            metadata=metadata,
-                            snapshot=snapshot,
-                            forecast_start_date=forecast_start_date,
+                        self._attach_forecast_context(
+                            self._market_payload_from_snapshot(
+                                metadata=metadata,
+                                snapshot=snapshot,
+                                forecast_start_date=forecast_start_date,
+                            ),
+                            row_count=None,
+                            horizon_days=horizon_days,
+                            window_size=window_size,
                         )
                     )
                     covered_tickers.add(str(snapshot.get("ticker")))
@@ -981,6 +1124,264 @@ class SupabaseForecastEngine:
             ),
         }
 
+    def _portfolio_constraints(
+        self,
+        *,
+        max_crypto_weight: float | None,
+        max_single_position_weight: float | None,
+        min_cash_weight: float | None,
+        preferred_asset_classes: list[str] | None,
+    ) -> dict[str, Any]:
+        preferred = {
+            str(asset_class).strip().lower()
+            for asset_class in preferred_asset_classes or []
+            if str(asset_class).strip().lower() in {"stock", "etf", "crypto"}
+        }
+        return {
+            "max_crypto_weight": None
+            if max_crypto_weight is None
+            else float(np.clip(max_crypto_weight, 0.0, 1.0)),
+            "max_single_position_weight": None
+            if max_single_position_weight is None
+            else float(np.clip(max_single_position_weight, 0.01, 1.0)),
+            "min_cash_weight": None
+            if min_cash_weight is None
+            else float(np.clip(min_cash_weight, 0.0, 1.0)),
+            "preferred_asset_classes": sorted(preferred),
+            "binding": [],
+        }
+
+    def _forecast_with_preference_score(
+        self,
+        forecast: dict[str, Any],
+        *,
+        risk: float,
+        preferred_asset_classes: set[str],
+    ) -> dict[str, Any]:
+        entry = dict(forecast)
+        base_score = self._forecast_score(entry, risk=risk)
+        if entry.get("asset_class") in preferred_asset_classes:
+            base_score += 0.04 + (0.08 * max(abs(base_score), 0.01))
+            entry["preference_boosted"] = True
+        entry["opportunity_score"] = float(base_score)
+        return entry
+
+    def _redistribute_weight_excess(
+        self,
+        *,
+        weights: np.ndarray,
+        caps: np.ndarray,
+        cash_weight: float,
+        eligible: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, float]:
+        adjusted = np.asarray(weights, dtype=float).copy()
+        cap_values = np.asarray(caps, dtype=float)
+        eligible_mask = (
+            np.ones_like(adjusted, dtype=bool)
+            if eligible is None
+            else np.asarray(eligible, dtype=bool)
+        )
+        for _ in range(20):
+            over = adjusted > cap_values
+            if not bool(np.any(over)):
+                break
+            excess = float(np.sum(adjusted[over] - cap_values[over]))
+            adjusted[over] = cap_values[over]
+            capacity = np.clip(cap_values - adjusted, 0.0, None)
+            capacity[~eligible_mask] = 0.0
+            capacity_sum = float(np.sum(capacity))
+            if excess <= 1e-12:
+                break
+            if capacity_sum <= 1e-12:
+                cash_weight += excess
+                break
+            adjusted += excess * (capacity / capacity_sum)
+        return adjusted, cash_weight
+
+    def _apply_portfolio_weight_constraints(
+        self,
+        *,
+        chosen: list[dict[str, Any]],
+        risky_weights: np.ndarray,
+        cash_weight: float,
+        max_single_position_weight: float,
+        max_crypto_weight: float | None,
+        constraints: dict[str, Any],
+    ) -> tuple[np.ndarray, float]:
+        weights = np.asarray(risky_weights, dtype=float)
+        caps = np.full_like(weights, max_single_position_weight, dtype=float)
+        if (
+            constraints.get("max_single_position_weight") is not None
+            and bool(np.any(weights > caps + 1e-9))
+        ):
+            constraints["binding"].append("max_single_position_weight")
+        weights, cash_weight = self._redistribute_weight_excess(
+            weights=weights,
+            caps=caps,
+            cash_weight=cash_weight,
+        )
+        if max_crypto_weight is not None:
+            crypto_mask = np.asarray(
+                [forecast.get("asset_class") == "crypto" for forecast in chosen],
+                dtype=bool,
+            )
+            crypto_weight = float(np.sum(weights[crypto_mask]))
+            if crypto_weight > max_crypto_weight + 1e-9:
+                constraints["binding"].append("max_crypto_weight")
+                excess = crypto_weight - max_crypto_weight
+                weights[crypto_mask] *= max_crypto_weight / max(crypto_weight, 1e-12)
+                non_crypto = ~crypto_mask
+                capacity = np.clip(caps - weights, 0.0, None)
+                capacity[~non_crypto] = 0.0
+                capacity_sum = float(np.sum(capacity))
+                if capacity_sum <= 1e-12:
+                    cash_weight += excess
+                else:
+                    weights += excess * (capacity / capacity_sum)
+                weights, cash_weight = self._redistribute_weight_excess(
+                    weights=weights,
+                    caps=caps,
+                    cash_weight=cash_weight,
+                    eligible=non_crypto,
+                )
+        total = float(np.sum(weights) + cash_weight)
+        if total > 1.0 + 1e-9:
+            scale = max((1.0 - cash_weight) / max(float(np.sum(weights)), 1e-12), 0.0)
+            weights *= scale
+        elif total < 1.0 - 1e-9:
+            cash_weight += 1.0 - total
+        return weights, float(cash_weight)
+
+    def _allocation_explanations(
+        self,
+        *,
+        allocations: list[dict[str, Any]],
+        forecasts: list[dict[str, Any]],
+        constraints: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        forecast_lookup = {forecast["ticker"]: forecast for forecast in forecasts}
+        explanations = []
+        class_roles = {
+            "stock": "Growth sleeve",
+            "etf": "Diversifier",
+            "crypto": "High-volatility sleeve",
+            "cash": "Downside buffer",
+        }
+        for allocation in allocations:
+            ticker = allocation["ticker"]
+            asset_class = allocation["asset_class"]
+            forecast = forecast_lookup.get(ticker)
+            if ticker == CASH_TICKER:
+                why = (
+                    "Cash is reserved to dampen bear-case outcomes and preserve optionality "
+                    "when forecast dispersion is wide."
+                )
+                data_quality = {
+                    "freshness_label": "Policy",
+                    "source": "configured_cash_return",
+                    "snapshot_used": False,
+                }
+            else:
+                confidence_label = str(forecast.get("confidence_label") or "Unknown")
+                change = forecast.get("forecast_change") or {}
+                change_note = (
+                    f" Latest stored base-return delta is {change['base_return_delta']:+.2%}."
+                    if change.get("available")
+                    else ""
+                )
+                why = (
+                    f"{ticker} is weighted from its risk-adjusted scenario score: "
+                    f"base {allocation['base_return']:+.2%}, bear {allocation['bear_return']:+.2%}, "
+                    f"{confidence_label.lower()} confidence.{change_note}"
+                )
+                data_quality = forecast.get("data_quality")
+            explanations.append(
+                {
+                    "ticker": ticker,
+                    "asset_class": asset_class,
+                    "weight": float(allocation["weight"]),
+                    "role": class_roles.get(asset_class, "Scenario sleeve"),
+                    "why": why,
+                    "risk_note": (
+                        "Constraint-aware weight"
+                        if constraints.get("binding")
+                        else "Forecast-ranked weight"
+                    ),
+                    "data_quality": data_quality,
+                    "base_return": float(allocation.get("base_return") or 0.0),
+                    "confidence": float(allocation.get("confidence") or 0.0),
+                }
+            )
+        return explanations
+
+    def _benchmark_comparison(
+        self,
+        *,
+        amount: float,
+        portfolio_summary: dict[str, float],
+        horizon_days: int,
+        window_size: int,
+        cash_return: float,
+    ) -> list[dict[str, Any]]:
+        rows = [
+            {
+                "label": "Cash return",
+                "ticker": CASH_TICKER,
+                "available": True,
+                "base_return": cash_return,
+                "bear_return": cash_return,
+                "bull_return": cash_return,
+                "base_value": float(amount * (1.0 + cash_return)),
+                "delta_vs_portfolio_base": cash_return
+                - float(portfolio_summary["base_return"]),
+                "note": "Configured annual cash return compounded over the selected horizon.",
+            }
+        ]
+        for ticker, label in (("SPY", "S&P 500 ETF"), ("QQQ", "Nasdaq 100 ETF")):
+            if not self.repository.ticker_exists(ticker):
+                rows.append(
+                    {
+                        "label": label,
+                        "ticker": ticker,
+                        "available": False,
+                        "note": f"{ticker} is not in the configured Supabase universe.",
+                    }
+                )
+                continue
+            try:
+                forecast = self.build_ticker_forecast(
+                    ticker=ticker,
+                    horizon_days=horizon_days,
+                    window_size=window_size,
+                    prefer_snapshot=True,
+                )
+            except ArtifactValidationError as exc:
+                rows.append(
+                    {
+                        "label": label,
+                        "ticker": ticker,
+                        "available": False,
+                        "note": str(exc),
+                    }
+                )
+                continue
+            rows.append(
+                {
+                    "label": label,
+                    "ticker": ticker,
+                    "available": True,
+                    "base_return": float(forecast["returns"]["base"]),
+                    "bear_return": float(forecast["returns"]["bear"]),
+                    "bull_return": float(forecast["returns"]["bull"]),
+                    "base_value": float(amount * (1.0 + forecast["returns"]["base"])),
+                    "delta_vs_portfolio_base": float(forecast["returns"]["base"])
+                    - float(portfolio_summary["base_return"]),
+                    "confidence": float(forecast["confidence"]),
+                    "data_quality": forecast.get("data_quality"),
+                }
+            )
+        return rows
+
     def run_portfolio_simulation(
         self,
         *,
@@ -989,10 +1390,29 @@ class SupabaseForecastEngine:
         horizon_days: int,
         selected_tickers: list[str] | None = None,
         window_size: int = 60,
+        max_crypto_weight: float | None = None,
+        max_single_position_weight: float | None = None,
+        min_cash_weight: float | None = None,
+        preferred_asset_classes: list[str] | None = None,
     ) -> dict[str, Any]:
         risk_value = float(np.clip(risk, 0.0, 1.0))
+        constraints = self._portfolio_constraints(
+            max_crypto_weight=max_crypto_weight,
+            max_single_position_weight=max_single_position_weight,
+            min_cash_weight=min_cash_weight,
+            preferred_asset_classes=preferred_asset_classes,
+        )
+        preferred = set(constraints["preferred_asset_classes"])
+        constraint_warnings: list[str] = []
         if selected_tickers:
             forecast_start_date = _forecast_start_date()
+            normalized_selected = [
+                _normalize_ticker(ticker)
+                for ticker in selected_tickers
+                if str(ticker).strip()
+            ]
+            if not normalized_selected:
+                raise ArtifactValidationError("No selected tickers were provided")
             forecasts = [
                 self.build_ticker_forecast(
                     ticker=ticker,
@@ -1001,10 +1421,16 @@ class SupabaseForecastEngine:
                     prefer_snapshot=True,
                     forecast_start_date=forecast_start_date,
                 )
-                for ticker in selected_tickers
+                for ticker in normalized_selected
             ]
-            for forecast in forecasts:
-                forecast["opportunity_score"] = self._forecast_score(forecast, risk=risk_value)
+            forecasts = [
+                self._forecast_with_preference_score(
+                    forecast,
+                    risk=risk_value,
+                    preferred_asset_classes=preferred,
+                )
+                for forecast in forecasts
+            ]
             ranked = sorted(forecasts, key=lambda entry: entry["opportunity_score"], reverse=True)
         else:
             ranked = self.run_market_forecast(
@@ -1013,6 +1439,21 @@ class SupabaseForecastEngine:
                 top_n=1000,
                 window_size=window_size,
             )["ranked_tickers"]
+            ranked = [
+                self._forecast_with_preference_score(
+                    forecast,
+                    risk=risk_value,
+                    preferred_asset_classes=preferred,
+                )
+                for forecast in ranked
+            ]
+            if preferred:
+                constraint_warnings.append(
+                    "Preferred asset classes received a ranking boost: "
+                    + ", ".join(sorted(preferred))
+                    + "."
+                )
+            ranked = sorted(ranked, key=lambda entry: entry["opportunity_score"], reverse=True)
             ranked = select_diversified_simulation_forecasts(
                 ranked,
                 risk=risk_value,
@@ -1039,8 +1480,19 @@ class SupabaseForecastEngine:
         cash_weight = float(np.clip(0.28 - (0.23 * risk_value), 0.02, 0.35))
         if float(np.mean([forecast["returns"]["base"] for forecast in chosen])) < cash_return:
             cash_weight = min(0.45, cash_weight + 0.12)
+        if constraints["min_cash_weight"] is not None and cash_weight < constraints["min_cash_weight"]:
+            cash_weight = float(constraints["min_cash_weight"])
+            constraints["binding"].append("min_cash_weight")
         risky_budget = max(1.0 - cash_weight, 0.0)
-        max_asset_weight = 0.18 + (0.07 * risk_value)
+        default_max_asset_weight = 0.18 + (0.07 * risk_value)
+        max_asset_weight = float(
+            min(
+                default_max_asset_weight,
+                constraints["max_single_position_weight"]
+                if constraints["max_single_position_weight"] is not None
+                else default_max_asset_weight,
+            )
+        )
         risky_weights = allocate_simulation_risky_weights(
             chosen,
             raw_scores,
@@ -1048,14 +1500,20 @@ class SupabaseForecastEngine:
             risk=risk_value,
             max_asset_weight=max_asset_weight,
         )
+        risky_weights, cash_weight = self._apply_portfolio_weight_constraints(
+            chosen=chosen,
+            risky_weights=risky_weights,
+            cash_weight=cash_weight,
+            max_single_position_weight=max_asset_weight,
+            max_crypto_weight=constraints["max_crypto_weight"],
+            constraints=constraints,
+        )
 
         allocations = []
-        bear_return = cash_weight * cash_return
-        base_return = cash_weight * cash_return
-        bull_return = cash_weight * cash_return
-        confidence_values = []
         for weight, forecast in zip(risky_weights, chosen):
             weight_value = float(weight)
+            if weight_value <= 1e-9:
+                continue
             allocations.append(
                 {
                     "ticker": forecast["ticker"],
@@ -1068,10 +1526,6 @@ class SupabaseForecastEngine:
                     "confidence": float(forecast["confidence"]),
                 }
             )
-            bear_return += weight_value * float(forecast["returns"]["bear"])
-            base_return += weight_value * float(forecast["returns"]["base"])
-            bull_return += weight_value * float(forecast["returns"]["bull"])
-            confidence_values.append(float(forecast["confidence"]))
 
         if cash_weight > 1e-9:
             allocations.append(
@@ -1086,13 +1540,22 @@ class SupabaseForecastEngine:
                     "confidence": 0.95,
                 }
             )
-            confidence_values.append(0.95)
 
         total_weight = sum(allocation["weight"] for allocation in allocations)
         if total_weight > 1e-12:
             for allocation in allocations:
                 allocation["weight"] = float(allocation["weight"] / total_weight)
                 allocation["amount"] = float(allocation["weight"] * amount)
+        bear_return = sum(
+            allocation["weight"] * allocation["bear_return"] for allocation in allocations
+        )
+        base_return = sum(
+            allocation["weight"] * allocation["base_return"] for allocation in allocations
+        )
+        bull_return = sum(
+            allocation["weight"] * allocation["bull_return"] for allocation in allocations
+        )
+        confidence_values = [float(allocation["confidence"]) for allocation in allocations]
         class_weights: dict[str, float] = {}
         for allocation in allocations:
             class_weights[allocation["asset_class"]] = (
@@ -1121,29 +1584,58 @@ class SupabaseForecastEngine:
         warnings = [
             "Forecasts are estimates and should be reviewed before making investment decisions."
         ]
+        warnings.extend(constraint_warnings)
+        if constraints["binding"]:
+            warnings.append(
+                "Portfolio constraints changed the final weights: "
+                + ", ".join(sorted(set(constraints["binding"])))
+                + "."
+            )
         if max(allocation["weight"] for allocation in allocations) > 0.24:
             warnings.append("One position is above 24%, so concentration risk is elevated.")
         if float(np.mean(confidence_values)) < 0.45:
             warnings.append("Average forecast confidence is low because the scenario band is wide.")
-        if cash_weight < 0.03 and risk_value < 0.95:
+        final_cash_weight = next(
+            (
+                float(allocation["weight"])
+                for allocation in allocations
+                if allocation["ticker"] == CASH_TICKER
+            ),
+            0.0,
+        )
+        if final_cash_weight < 0.03 and risk_value < 0.95:
             warnings.append("Cash is very low for a non-maximum risk setting.")
+        summary = {
+            "bear_value": float(amount * (1.0 + bear_return)),
+            "base_value": float(amount * (1.0 + base_return)),
+            "bull_value": float(amount * (1.0 + bull_return)),
+            "bear_return": float(bear_return),
+            "base_return": float(base_return),
+            "bull_return": float(bull_return),
+            "average_confidence": float(np.mean(confidence_values)),
+        }
         return {
             "amount": float(amount),
             "risk": risk_value,
             "horizon_days": max(int(horizon_days), 1),
             "method": "supabase_forecast_ranked_scenario_simulator",
-            "summary": {
-                "bear_value": float(amount * (1.0 + bear_return)),
-                "base_value": float(amount * (1.0 + base_return)),
-                "bull_value": float(amount * (1.0 + bull_return)),
-                "bear_return": float(bear_return),
-                "base_return": float(base_return),
-                "bull_return": float(bull_return),
-                "average_confidence": float(np.mean(confidence_values)),
-            },
+            "summary": summary,
             "asset_allocations": allocations,
             "class_allocations": class_allocations,
             "trade_plan": trade_plan,
             "source_forecasts": chosen,
             "warnings": warnings,
+            "benchmark_comparison": self._benchmark_comparison(
+                amount=float(amount),
+                portfolio_summary=summary,
+                horizon_days=max(int(horizon_days), 1),
+                window_size=window_size,
+                cash_return=cash_return,
+            ),
+            "allocation_explanations": self._allocation_explanations(
+                allocations=allocations,
+                forecasts=chosen,
+                constraints=constraints,
+            ),
+            "constraints_applied": constraints,
         }

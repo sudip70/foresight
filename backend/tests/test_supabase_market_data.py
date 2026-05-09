@@ -590,6 +590,35 @@ def test_forecast_engine_uses_stored_snapshot_for_default_horizon():
     assert abs(stored["risk_metrics"]["annualized_return"] - expected_annualized) < 1e-12
 
 
+def test_ticker_forecast_reports_change_since_previous_snapshot():
+    repository = _seed_repository()
+    engine = SupabaseForecastEngine(repository, resettable_settings())
+    current_forecast = engine.build_ticker_forecast(
+        ticker="AAA",
+        horizon_days=30,
+        window_size=20,
+        prefer_snapshot=False,
+    )
+    previous_snapshot = {
+        **engine.forecast_snapshot_row(current_forecast),
+        "as_of_date": "2025-03-20",
+        "base_return": current_forecast["returns"]["base"] - 0.05,
+        "bear_return": current_forecast["returns"]["bear"] - 0.03,
+        "bull_return": current_forecast["returns"]["bull"] - 0.07,
+        "confidence": current_forecast["confidence"] - 0.10,
+        "base_target": current_forecast["target_prices"]["base"] - 5.0,
+    }
+    repository.upsert_forecasts([previous_snapshot])
+
+    refreshed = engine.run_ticker_forecast(ticker="AAA", horizon_days=30, window_size=20)
+
+    assert refreshed["forecast_change"]["available"] is True
+    assert refreshed["forecast_change"]["previous_as_of"] == "2025-03-20"
+    assert round(refreshed["forecast_change"]["base_return_delta"], 6) == 0.05
+    assert refreshed["data_quality"]["source"] == "supabase_ohlcv"
+    assert refreshed["data_quality"]["history_rows"] == 80
+
+
 def test_forecast_engine_ignores_snapshot_that_does_not_match_latest_market_date():
     repository = _seed_repository()
     engine = SupabaseForecastEngine(repository, resettable_settings())
@@ -610,6 +639,55 @@ def test_forecast_engine_ignores_snapshot_that_does_not_match_latest_market_date
 
     assert computed["snapshot_used"] is False
     assert computed["source"] == "supabase_ohlcv"
+
+
+def test_portfolio_simulation_applies_constraints_and_explanations():
+    repository = InMemoryMarketDataRepository()
+    repository.upsert_universe(
+        [
+            *_assets(),
+            {
+                "ticker": "CCC",
+                "asset_class": "crypto",
+                "display_name": "CCC Crypto",
+                "provider_symbol": "CCC-USD",
+                "exchange": "CRYPTO",
+                "currency": "USD",
+                "sector": "Crypto",
+                "industry": "Digital Asset",
+                "country": "Global",
+                "benchmark_group": "test",
+                "min_history_days": 30,
+                "active": True,
+            },
+        ]
+    )
+    repository.upsert_ohlcv(_ohlcv_rows("AAA"))
+    repository.upsert_ohlcv(_ohlcv_rows("BBB"))
+    repository.upsert_ohlcv(_ohlcv_rows("CCC"))
+    engine = SupabaseForecastEngine(repository, resettable_settings())
+
+    result = engine.run_portfolio_simulation(
+        amount=10_000,
+        risk=0.9,
+        horizon_days=30,
+        window_size=20,
+        selected_tickers=["AAA", "BBB", "CCC"],
+        max_crypto_weight=0.05,
+        min_cash_weight=0.50,
+        max_single_position_weight=0.40,
+    )
+
+    allocations = {allocation["ticker"]: allocation for allocation in result["asset_allocations"]}
+    class_allocations = {
+        allocation["asset_class"]: allocation for allocation in result["class_allocations"]
+    }
+    assert class_allocations["cash"]["weight"] >= 0.50
+    assert class_allocations.get("crypto", {"weight": 0.0})["weight"] <= 0.0500001
+    assert "min_cash_weight" in result["constraints_applied"]["binding"]
+    assert "max_crypto_weight" in result["constraints_applied"]["binding"]
+    assert result["allocation_explanations"]
+    assert result["benchmark_comparison"][0]["ticker"] == "CASH"
 
 
 def test_app_forecast_endpoints_work_from_market_repo_when_artifacts_are_broken(

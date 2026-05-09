@@ -1,0 +1,151 @@
+/* Theme tokens */
+
+:root {
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --bg: #f9fafb;
+  --surface: #ffffff;
+  --surface-soft: #f3f4f6;
+  --ink: #111827;
+  --muted: #6b7280;
+  --faint: #9ca3af;
+  --line: #e5e7eb;
+  --line-strong: #d1d5db;
+  --accent: #10b981;
+  --accent-strong: #059669;
+  --accent-soft: #d1fae5;
+  --blue: #3b82f6;
+  --blue-soft: #dbeafe;
+  --cyan: #06b6d4;
+  --amber: #f59e0b;
+  --amber-soft: #fef3c7;
+  --danger: #ef4444;
+  --danger-soft: #fee2e2;
+  --cash: #9ca3af;
+  --shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+  --surface-shadow: 0 2px 12px -2px rgba(0, 0, 0, 0.04);
+  --page-start: #ffffff;
+  --page-glow: rgba(16, 185, 129, 0.05);
+  --brand-ink: #111827;
+  --brand-muted: #6b7280;
+  --label: #374151;
+  --focus-ring: rgba(16, 185, 129, 0.3);
+  --accent-border: rgba(16, 185, 129, 0.5);
+  --active-tab-bg: #f0fdf4;
+  --workspace-bg: rgba(255, 255, 255, 0.6);
+  --panel-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.1);
+  --tab-hover-bg: #f3f4f6;
+  --chart-grid: #f3f4f6;
+  --neutral-pill-bg: #f3f4f6;
+  --neutral-pill-ink: #4b5563;
+  --action-hold-bg: #f3f4f6;
+  --action-hold-ink: #4b5563;
+  --info-border: #bfdbfe;
+  --info-bg: #eff6ff;
+  --info-ink: #1e3a8a;
+  --good-insight-bg: #f0fdf4;
+  --good-insight-ink: #166534;
+  --warn-insight-bg: #fffbeb;
+  --warn-insight-ink: #92400e;
+  --info-insight-bg: #eff6ff;
+  --info-insight-ink: #1e40af;
+  --gauge-track: #f3f4f6;
+  --danger-border: #fca5a5;
+  --base-border: #6ee7b7;
+  --bull-border: #93c5fd;
+  --bear-tile-bg: #fef2f2;
+  --base-tile-bg: #f0fdf4;
+  --bull-tile-bg: #eff6ff;
+  --warning-border: #fcd34d;
+  --warning-ink: #92400e;
+  --tooltip-bg: rgba(255, 255, 255, 0.95);
+  --radius: 12px;
+}
+
+html[data-theme="dark"] {
+  --bg: #09090b;
+  --surface: #18181b;
+  --surface-soft: #27272a;
+  --ink: #fafafa;
+  --muted: #a1a1aa;
+  --faint: #71717a;
+  --line: #27272a;
+  --line-strong: #3f3f46;
+  --accent: #10b981;
+  --accent-strong: #34d399;
+  --accent-soft: rgba(16, 185, 129, 0.15);
+  --blue: #60a5fa;
+  --blue-soft: rgba(59, 130, 246, 0.15);
+  --cyan: #22d3ee;
+  --amber: #fbbf24;
+  --amber-soft: rgba(245, 158, 11, 0.15);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.15);
+  --cash: #71717a;
+  --shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
+  --surface-shadow: 0 2px 12px -2px rgba(0, 0, 0, 0.3);
+  --page-start: #09090b;
+  --page-glow: rgba(16, 185, 129, 0.05);
+  --brand-ink: #fafafa;
+  --brand-muted: #a1a1aa;
+  --label: #e4e4e7;
+  --focus-ring: rgba(16, 185, 129, 0.3);
+  --accent-border: rgba(16, 185, 129, 0.5);
+  --active-tab-bg: rgba(16, 185, 129, 0.1);
+  --workspace-bg: rgba(24, 24, 27, 0.6);
+  --panel-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.6);
+  --tab-hover-bg: #27272a;
+  --chart-grid: rgba(255, 255, 255, 0.05);
+  --neutral-pill-bg: #27272a;
+  --neutral-pill-ink: #e4e4e7;
+  --action-hold-bg: #27272a;
+  --action-hold-ink: #e4e4e7;
+  --info-border: rgba(59, 130, 246, 0.3);
+  --info-bg: rgba(59, 130, 246, 0.1);
+  --info-ink: #bfdbfe;
+  --good-insight-bg: rgba(16, 185, 129, 0.1);
+  --good-insight-ink: #a7f3d0;
+  --warn-insight-bg: rgba(245, 158, 11, 0.1);
+  --warn-insight-ink: #fde68a;
+  --info-insight-bg: rgba(59, 130, 246, 0.1);
+  --info-insight-ink: #bfdbfe;
+  --gauge-track: #27272a;
+  --danger-border: rgba(248, 113, 113, 0.3);
+  --base-border: rgba(16, 185, 129, 0.3);
+  --bull-border: rgba(59, 130, 246, 0.3);
+  --bear-tile-bg: rgba(248, 113, 113, 0.05);
+  --base-tile-bg: rgba(16, 185, 129, 0.05);
+  --bull-tile-bg: rgba(59, 130, 246, 0.05);
+  --warning-border: rgba(245, 158, 11, 0.3);
+  --warning-ink: #fde68a;
+  --tooltip-bg: rgba(24, 24, 27, 0.95);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--bg);
+}
+
+.icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+svg.nav-icon,
+svg.mobile-nav-icon,
+svg.empty-state-icon,
+svg.toast-icon,
+svg.cmd-result-icon,
+svg.ui-icon {
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
