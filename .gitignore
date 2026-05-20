@@ -1,3 +1,4 @@
+.claude/
 .venv/
 supabase/.temp/
 __pycache__/
