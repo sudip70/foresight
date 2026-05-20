@@ -40,8 +40,8 @@ export function hideHoverTooltip() {
 export function sentimentTooltipContent() {
   if (!state.sentiment) return "";
   return `
-    <strong>Market sentiment: ${state.sentiment.label}</strong>
-    <span>Score: ${state.sentiment.score}/100</span>
+    <strong>Market sentiment: ${escapeHtml(state.sentiment.label)}</strong>
+    <span>Score: ${escapeHtml(String(state.sentiment.score))}/100</span>
     <span>Base scenario average: ${signedPercentLabel(state.sentiment.baseAverage)}</span>
     <span>Bear scenario average: ${signedPercentLabel(state.sentiment.bearAverage)}</span>
     <span>Confidence average: ${formatPercent(state.sentiment.confidenceAverage)}</span>
@@ -64,7 +64,7 @@ export function allocationSegmentAtPoint(event, donut) {
 export function allocationTooltipContent(segment) {
   if (!segment) return "";
   return `
-    <strong>${segment.label}</strong>
+    <strong>${escapeHtml(segment.label)}</strong>
     <span>${formatPercent(segment.weight)} of portfolio</span>
     <span>${formatCurrency(segment.amount || 0)}</span>
   `;
@@ -105,7 +105,7 @@ export function metricCard(label, value, tooltip, subtitle = "", valueTone = "")
 export function lessonCard(title, body, detail = "") {
   return `
     <article class="lesson-card">
-      <strong>${title}</strong>
+      <strong>${escapeHtml(title)}</strong>
       <p>${body}</p>
       ${detail ? `<small>${detail}</small>` : ""}
     </article>
@@ -137,7 +137,7 @@ export function showToast(message, type = "info") {
   setTimeout(() => { toast.style.opacity = "0"; toast.style.transition = "opacity 200ms"; setTimeout(() => toast.remove(), 250); }, 4000);
 }
 
-export function setLoading(target, message = "Loading...") {
+export function setLoading(target) {
   target.innerHTML = `
     <div class="skeleton">
       <div class="skeleton-text"></div>

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import OrderedDict
+
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from backend.app.api.routes.dependencies import (
@@ -125,13 +127,17 @@ def market_index_history(
 ):
     from backend.app import main as app_main
 
+    _HISTORY_CACHE_MAX = 50
     app = request.app
     settings = get_settings()
     normalized_symbol = symbol.strip().upper()
     normalized_range = history_range.strip().lower()
     cache_key = (normalized_symbol, normalized_range)
-    history_cache = getattr(app.state, "market_index_history_cache", {})
+    history_cache: OrderedDict = getattr(app.state, "market_index_history_cache", OrderedDict())
+    if not isinstance(history_cache, OrderedDict):
+        history_cache = OrderedDict(history_cache)
     if cache_key in history_cache:
+        history_cache.move_to_end(cache_key)
         return history_cache[cache_key]
     repository = getattr(app.state, "market_repository", None)
     repository_error: Exception | None = None
@@ -144,6 +150,8 @@ def market_index_history(
                 history_range=normalized_range,
             )
             history_cache[cache_key] = payload
+            while len(history_cache) > _HISTORY_CACHE_MAX:
+                history_cache.popitem(last=False)
             app.state.market_index_history_cache = history_cache
             return payload
         except ValueError as repository_exc:
@@ -162,6 +170,8 @@ def market_index_history(
             history_range=normalized_range,
         )
         history_cache[cache_key] = payload
+        while len(history_cache) > _HISTORY_CACHE_MAX:
+            history_cache.popitem(last=False)
         app.state.market_index_history_cache = history_cache
         return payload
     except ValueError as exc:

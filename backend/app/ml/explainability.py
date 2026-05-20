@@ -95,12 +95,9 @@ def build_explanations(
         raise ExplainabilityUnavailable("Not enough data to build surrogate explanations")
 
     if candidate_steps.size > engine.settings.surrogate_sample_size:
-        sample_index = np.linspace(
-            0,
-            candidate_steps.size - 1,
-            num=engine.settings.surrogate_sample_size,
-            dtype=int,
-        )
+        sample_index = np.round(
+            np.linspace(0, candidate_steps.size - 1, num=engine.settings.surrogate_sample_size)
+        ).astype(int)
         candidate_steps = candidate_steps[sample_index]
 
     current_targets = _build_target_map(inference_result)

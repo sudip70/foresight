@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import json
+import warnings
 
 import numpy as np
 
@@ -467,9 +468,21 @@ def align_observation(observation: np.ndarray, target_dim: int | None) -> np.nda
     if target_dim is None or target_dim == vector.shape[0]:
         return vector
     if vector.shape[0] < target_dim:
+        warnings.warn(
+            f"Observation dim {vector.shape[0]} is smaller than policy expects {target_dim}; "
+            "padding with zeros. Check artifact observation_dim metadata.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         return np.concatenate(
             [vector, np.zeros(target_dim - vector.shape[0], dtype=np.float32)]
         )
+    warnings.warn(
+        f"Observation dim {vector.shape[0]} exceeds policy expects {target_dim}; "
+        "trailing features will be dropped. Check artifact observation_dim metadata.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
     return vector[:target_dim]
 
 

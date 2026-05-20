@@ -216,10 +216,16 @@
             </summary>
             <div class="settings-panel">
               <button class="settings-close" type="button" aria-label="Close settings" data-close-details>&times;</button>
-              <label for="apiBase">Backend URL</label>
-              <input id="apiBase" type="url" placeholder="https://foresight-backend-a5qx.onrender.com" />
-              <label for="windowSize">Estimator window</label>
-              <input id="windowSize" type="number" min="2" max="756" value="60" step="1" />
+              <div class="why-container">
+                <label for="apiBase">Backend URL <button class="why-btn" type="button" data-why="The URL of the Foresight backend API. Use the default Render address or enter http://localhost:8000 when running locally. Click Use Backend to connect.">?</button></label>
+                <div class="why-popover-slot"></div>
+                <input id="apiBase" type="url" placeholder="https://foresight-backend-a5qx.onrender.com" />
+              </div>
+              <div class="why-container">
+                <label for="windowSize">Estimator window <button class="why-btn" type="button" data-why="Number of historical trading days used to build each forecast scenario. Smaller values (e.g. 30) react faster to recent price changes; larger values (e.g. 120) smooth out short-term noise. Default: 60 days.">?</button></label>
+                <div class="why-popover-slot"></div>
+                <input id="windowSize" type="number" min="2" max="756" value="60" step="1" />
+              </div>
               <button id="saveApiBase">Use Backend</button>
               <p id="apiStatus" class="muted">Waiting for connection.</p>
             </div>
@@ -230,6 +236,12 @@
       <!-- Mobile Top Bar -->
       <header class="mobile-topbar">
         <span class="brand-name">Foresight</span>
+        <div class="mobile-progress" aria-label="Learning progress">
+          <span class="progress-level">Level 1: Novice</span>
+          <div class="progress-track">
+            <div class="progress-bar" style="width: 0%"></div>
+          </div>
+        </div>
         <button id="mobileMenuToggle" class="mobile-menu-btn" aria-label="Menu" aria-expanded="false">☰</button>
       </header>
 
@@ -517,8 +529,9 @@
                 <input id="horizon" type="number" min="1" max="730" value="300" step="1" />
               </div>
               <span class="control-divider" aria-hidden="true"></span>
-              <div class="control-field window-field">
-                <label for="windowSizeInline">Window</label>
+              <div class="control-field window-field why-container">
+                <label for="windowSizeInline">Window <button class="why-btn" type="button" data-why="Number of historical trading days used to build each forecast scenario. Smaller values (e.g. 30) react faster to recent price changes; larger values (e.g. 120) smooth out short-term noise. Default: 60 days.">?</button></label>
+                <div class="why-popover-slot"></div>
                 <input id="windowSizeInline" type="number" min="2" max="756" value="60" step="1" />
               </div>
               <button id="refreshDashboard" class="secondary-button">Refresh data</button>

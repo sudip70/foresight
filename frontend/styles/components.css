@@ -377,6 +377,31 @@ body.disclaimer-pending .mobile-bottom-nav {
   border-bottom: 1px solid var(--line);
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+}
+
+.mobile-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+
+.mobile-progress .progress-level {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.mobile-progress .progress-track {
+  width: 100%;
+  height: 3px;
 }
 
 .mobile-menu-btn {
@@ -433,8 +458,14 @@ body.disclaimer-pending .mobile-bottom-nav {
 
 /* ── Why Button ── */
 .why-btn {
-  min-height: 24px;
-  min-width: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  height: 22px;
+  width: 22px;
+  min-height: 22px;
+  min-width: 22px;
   padding: 0;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -442,9 +473,11 @@ body.disclaimer-pending .mobile-bottom-nav {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 700;
+  line-height: 1;
   cursor: pointer;
   transition: all 150ms ease;
   margin-left: 6px;
+  vertical-align: middle;
 }
 
 .why-btn:hover {
@@ -453,8 +486,17 @@ body.disclaimer-pending .mobile-bottom-nav {
   color: var(--accent);
 }
 
+.why-container {
+  display: grid;
+  gap: 8px;
+}
+
+.why-popover-slot:empty {
+  display: none;
+}
+
 .why-popover {
-  margin-top: 10px;
+  margin-top: 0;
   padding: 12px 14px;
   border-radius: var(--radius);
   background: var(--info-bg);
@@ -849,6 +891,17 @@ body:not(.learn-mode) .learn-panel {
 
 .compact-note {
   margin-top: 16px;
+}
+
+@keyframes highlight-pulse {
+  0%   { box-shadow: 0 0 0 0 var(--accent); }
+  40%  { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.highlight-pulse {
+  animation: highlight-pulse 1.5s ease-out;
+  border-radius: 6px;
 }
 
 .insight-list {

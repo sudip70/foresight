@@ -117,6 +117,7 @@
   }
 
   .learning-progress { display: none; }
+  .sidebar.is-mobile-open .learning-progress { display: flex; }
 
   .section-head,
   .section-head.with-actions,

@@ -14,10 +14,10 @@ import { lessonCard, termChip } from "../utils/dom.js";
 
 export function renderGlossary() {
   if (!elements.glossaryList) return;
-  elements.glossaryList.innerHTML = Object.values(glossary)
+  elements.glossaryList.innerHTML = Object.entries(glossary)
     .map(
-      (term) => `
-        <article class="glossary-item">
+      ([key, term]) => `
+        <article class="glossary-item" data-glossary-key="${escapeHtml(key)}">
           <strong>${escapeHtml(term.title)}</strong>
           <span>${escapeHtml(term.definition)}</span>
         </article>

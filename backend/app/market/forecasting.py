@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from datetime import date, datetime, timedelta
 import json
 import math
@@ -18,10 +18,24 @@ from backend.app.market.simulation import (
     select_diversified_simulation_forecasts,
 )
 from backend.app.ml.errors import ArtifactValidationError
+from backend.app.ml.utils import (
+    apply_portfolio_weight_constraints,
+    confidence_label,
+    forecast_score,
+    historical_drawdown,
+    portfolio_constraint_payload,
+    redistribute_weight_excess,
+    return_caps,
+    risk_label,
+    soft_cap_return,
+)
 
 
 CASH_ASSET_CLASS = "cash"
 CASH_TICKER = "CASH"
+
+_MARKET_FORECAST_CACHE_MAX = 8
+_TICKER_ROWS_CACHE_MAX = 200
 
 
 def _normalize_ticker(ticker: str) -> str:
@@ -74,81 +88,16 @@ def _rebase_forecast_paths(
     return rebased
 
 
-def _historical_drawdown(prices: np.ndarray) -> float:
-    series = np.asarray(prices, dtype=float).reshape(-1)
-    if series.shape[0] <= 1:
-        return 0.0
-    running_peak = np.maximum.accumulate(series)
-    drawdown = 1.0 - (series / np.clip(running_peak, 1e-12, None))
-    return float(np.max(drawdown))
-
-
-def _confidence_label(confidence: float) -> str:
-    if confidence >= 0.70:
-        return "High"
-    if confidence >= 0.45:
-        return "Medium"
-    return "Low"
-
-
-def _risk_label(annualized_volatility: float, max_drawdown: float) -> str:
-    risk_score = annualized_volatility + (0.60 * max_drawdown)
-    if risk_score >= 0.65:
-        return "High"
-    if risk_score >= 0.30:
-        return "Moderate"
-    return "Lower"
-
-
-def _return_caps(asset_class: str) -> tuple[float, float]:
-    if asset_class == "crypto":
-        return -0.0030, 0.00125
-    if asset_class == "stock":
-        return -0.0016, 0.00075
-    return -0.0012, 0.00055
-
-
-def _soft_cap_return(value: float, *, lower: float, upper: float) -> float:
-    if value >= 0.0:
-        return float(upper * math.tanh(value / max(upper, 1e-12)))
-    lower_abs = abs(lower)
-    return float(-lower_abs * math.tanh(abs(value) / max(lower_abs, 1e-12)))
-
-
-def _normalize_weights_with_caps(scores: np.ndarray, cap: float) -> np.ndarray:
-    weights = np.asarray(scores, dtype=float)
-    weights = np.clip(weights, 0.0, None)
-    if float(weights.sum()) <= 1e-12:
-        weights = np.ones_like(weights, dtype=float)
-    weights = weights / float(weights.sum())
-    cap_value = max(float(cap), 1e-9)
-    for _ in range(20):
-        over = weights > cap_value
-        if not bool(np.any(over)):
-            break
-        excess = float(np.sum(weights[over] - cap_value))
-        weights[over] = cap_value
-        under = ~over
-        under_sum = float(np.sum(weights[under]))
-        if under_sum <= 1e-12:
-            break
-        weights[under] += excess * (weights[under] / under_sum)
-    total = float(weights.sum())
-    if total > 1e-12:
-        weights = weights / total
-    return weights
-
-
 class SupabaseForecastEngine:
     def __init__(self, repository: MarketDataRepository, settings: Settings) -> None:
         self.repository = repository
         self.settings = settings
-        self._market_forecast_cache: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+        self._market_forecast_cache: OrderedDict[tuple[Any, ...], list[dict[str, Any]]] = OrderedDict()
         self._macro_payload_cache: tuple[str, dict[str, Any]] | None = None
-        self._ticker_rows_cache: dict[
+        self._ticker_rows_cache: OrderedDict[
             str,
             tuple[tuple[str | None, str], dict[str, Any], list[dict[str, Any]]],
-        ] = {}
+        ] = OrderedDict()
 
     def _cash_daily_return(self) -> float:
         return float((1.0 + self.settings.meta_cash_annual_return) ** (1.0 / 252.0) - 1.0)
@@ -200,22 +149,6 @@ class SupabaseForecastEngine:
             return -1.0
         return float(
             (1.0 + horizon_return) ** (252.0 / max(int(horizon_days), 1)) - 1.0
-        )
-
-    def _forecast_score(self, forecast: dict[str, Any], *, risk: float) -> float:
-        risk_value = float(np.clip(risk, 0.0, 1.0))
-        base_return = float(forecast["returns"]["base"])
-        bull_return = float(forecast["returns"]["bull"])
-        bear_return = float(forecast["returns"]["bear"])
-        volatility = float(forecast["risk_metrics"]["annualized_volatility"])
-        confidence = float(forecast["confidence"])
-        downside = max(-bear_return, 0.0)
-        return float(
-            base_return
-            + (risk_value * 0.35 * max(bull_return, 0.0))
-            - ((1.0 - risk_value) * 0.65 * downside)
-            - ((0.15 + (0.20 * (1.0 - risk_value))) * volatility)
-            + (0.12 * confidence)
         )
 
     def _data_quality_payload(
@@ -377,6 +310,8 @@ class SupabaseForecastEngine:
             dict(metadata),
             [dict(row) for row in rows],
         )
+        while len(self._ticker_rows_cache) > _TICKER_ROWS_CACHE_MAX:
+            self._ticker_rows_cache.popitem(last=False)
         return metadata, rows
 
     def _prepare_price_series(self, rows: list[dict[str, Any]]) -> tuple[np.ndarray, list[str]]:
@@ -437,8 +372,8 @@ class SupabaseForecastEngine:
         prior_mu = (0.70 * long_mu) + (0.30 * self._cash_daily_return())
         daily_mu = ((1.0 - shrink) * blended_mu) + (shrink * prior_mu)
         daily_mu = (0.55 * daily_mu) + (0.30 * medium_mu) + (0.15 * short_mu)
-        lower, upper = _return_caps(asset_class)
-        capped_mu = _soft_cap_return(daily_mu, lower=lower, upper=upper)
+        lower, upper = return_caps(asset_class)
+        capped_mu = soft_cap_return(daily_mu, lower=lower, upper=upper)
         recent_vol = float(np.std(returns[-min(90, returns.shape[0]) :])) if returns.size else 0.0
         daily_volatility = max(blended_vol, recent_vol, 1e-6)
         return capped_mu, daily_volatility, {
@@ -537,17 +472,17 @@ class SupabaseForecastEngine:
         max_drawdown = _as_float(snapshot.get("drawdown"))
         annualized_volatility = _as_float(snapshot.get("volatility"))
         confidence = _as_float(snapshot.get("confidence"), 0.05)
-        confidence_label = snapshot.get("confidence_label") or _confidence_label(confidence)
+        confidence_label_str = snapshot.get("confidence_label") or confidence_label(confidence)
         horizon_days = int(snapshot["horizon_days"])
         target_prices = {
             "bear": _as_float(snapshot.get("bear_target")),
             "base": _as_float(snapshot.get("base_target")),
             "bull": _as_float(snapshot.get("bull_target")),
         }
-        risk_label = _risk_label(annualized_volatility, max_drawdown)
+        risk_label_str = risk_label(annualized_volatility, max_drawdown)
         summary = (
-            f"{ticker} has a {confidence_label.lower()}-confidence base-case scenario "
-            f"with {risk_label.lower()} risk."
+            f"{ticker} has a {confidence_label_str.lower()}-confidence base-case scenario "
+            f"with {risk_label_str.lower()} risk."
         )
         return {
             "ticker": ticker,
@@ -573,9 +508,9 @@ class SupabaseForecastEngine:
                 "regime_stability": 1.0,
             },
             "confidence": confidence,
-            "confidence_label": confidence_label,
-            "risk_label": risk_label,
-            "opportunity_score": self._forecast_score(
+            "confidence_label": confidence_label_str,
+            "risk_label": risk_label_str,
+            "opportunity_score": forecast_score(
                 {
                     "returns": returns,
                     "risk_metrics": {"annualized_volatility": annualized_volatility},
@@ -611,7 +546,7 @@ class SupabaseForecastEngine:
         max_drawdown = _as_float(snapshot.get("drawdown"))
         annualized_volatility = _as_float(snapshot.get("volatility"))
         confidence = _as_float(snapshot.get("confidence"), 0.05)
-        confidence_label = snapshot.get("confidence_label") or _confidence_label(confidence)
+        confidence_label_str = snapshot.get("confidence_label") or confidence_label(confidence)
         horizon_days = int(snapshot["horizon_days"])
         target_prices = {
             "bear": _as_float(snapshot.get("bear_target")),
@@ -640,8 +575,8 @@ class SupabaseForecastEngine:
                 "regime_stability": 1.0,
             },
             "confidence": confidence,
-            "confidence_label": confidence_label,
-            "risk_label": _risk_label(annualized_volatility, max_drawdown),
+            "confidence_label": confidence_label_str,
+            "risk_label": risk_label(annualized_volatility, max_drawdown),
             "return_estimator": {
                 "method": "stored_supabase_snapshot",
                 "method_version": snapshot.get("method_version", FORECAST_METHOD_VERSION),
@@ -749,7 +684,7 @@ class SupabaseForecastEngine:
         }
         annualized_volatility = float(daily_volatility * math.sqrt(252))
         annualized_return = float(math.exp(daily_mu * 252) - 1.0)
-        max_drawdown = _historical_drawdown(prices)
+        max_drawdown = historical_drawdown(prices)
         spread = max(returns["bull"] - returns["bear"], 0.0)
         data_factor = min(float(prices.shape[0]) / 756.0, 1.0)
         volatility_penalty = min(annualized_volatility / 1.10, 1.0)
@@ -766,12 +701,12 @@ class SupabaseForecastEngine:
             )
         )
         confidence = float(np.clip(confidence - horizon_penalty, 0.05, 0.95))
-        confidence_label = _confidence_label(confidence)
-        risk_label = _risk_label(annualized_volatility, max_drawdown)
+        confidence_label_str = confidence_label(confidence)
+        risk_label_str = risk_label(annualized_volatility, max_drawdown)
         if returns["base"] > 0 and confidence >= 0.45:
             summary = (
                 f"{metadata['ticker']} has a positive base-case scenario with "
-                f"{risk_label.lower()} risk and {confidence_label.lower()} confidence."
+                f"{risk_label_str.lower()} risk and {confidence_label_str.lower()} confidence."
             )
         elif returns["base"] > 0:
             summary = f"{metadata['ticker']} has upside in the base case, but the scenario band is wide."
@@ -803,9 +738,9 @@ class SupabaseForecastEngine:
                 "regime_stability": 1.0,
             },
             "confidence": confidence,
-            "confidence_label": confidence_label,
-            "risk_label": risk_label,
-            "opportunity_score": self._forecast_score(
+            "confidence_label": confidence_label_str,
+            "risk_label": risk_label_str,
+            "opportunity_score": forecast_score(
                 {
                     "returns": returns,
                     "risk_metrics": {"annualized_volatility": annualized_volatility},
@@ -1080,10 +1015,12 @@ class SupabaseForecastEngine:
                 except ArtifactValidationError:
                     continue
             self._market_forecast_cache[cache_key] = [forecast.copy() for forecast in forecasts]
+            while len(self._market_forecast_cache) > _MARKET_FORECAST_CACHE_MAX:
+                self._market_forecast_cache.popitem(last=False)
         if not forecasts:
             raise ArtifactValidationError("No Supabase tickers have enough market history")
         for forecast in forecasts:
-            forecast["opportunity_score"] = self._forecast_score(forecast, risk=risk)
+            forecast["opportunity_score"] = forecast_score(forecast, risk=risk)
             forecast["risk_score"] = float(
                 forecast["risk_metrics"]["annualized_volatility"]
                 + max(-forecast["returns"]["bear"], 0.0)
@@ -1124,33 +1061,6 @@ class SupabaseForecastEngine:
             ),
         }
 
-    def _portfolio_constraints(
-        self,
-        *,
-        max_crypto_weight: float | None,
-        max_single_position_weight: float | None,
-        min_cash_weight: float | None,
-        preferred_asset_classes: list[str] | None,
-    ) -> dict[str, Any]:
-        preferred = {
-            str(asset_class).strip().lower()
-            for asset_class in preferred_asset_classes or []
-            if str(asset_class).strip().lower() in {"stock", "etf", "crypto"}
-        }
-        return {
-            "max_crypto_weight": None
-            if max_crypto_weight is None
-            else float(np.clip(max_crypto_weight, 0.0, 1.0)),
-            "max_single_position_weight": None
-            if max_single_position_weight is None
-            else float(np.clip(max_single_position_weight, 0.01, 1.0)),
-            "min_cash_weight": None
-            if min_cash_weight is None
-            else float(np.clip(min_cash_weight, 0.0, 1.0)),
-            "preferred_asset_classes": sorted(preferred),
-            "binding": [],
-        }
-
     def _forecast_with_preference_score(
         self,
         forecast: dict[str, Any],
@@ -1159,98 +1069,12 @@ class SupabaseForecastEngine:
         preferred_asset_classes: set[str],
     ) -> dict[str, Any]:
         entry = dict(forecast)
-        base_score = self._forecast_score(entry, risk=risk)
+        base_score = forecast_score(entry, risk=risk)
         if entry.get("asset_class") in preferred_asset_classes:
             base_score += 0.04 + (0.08 * max(abs(base_score), 0.01))
             entry["preference_boosted"] = True
         entry["opportunity_score"] = float(base_score)
         return entry
-
-    def _redistribute_weight_excess(
-        self,
-        *,
-        weights: np.ndarray,
-        caps: np.ndarray,
-        cash_weight: float,
-        eligible: np.ndarray | None = None,
-    ) -> tuple[np.ndarray, float]:
-        adjusted = np.asarray(weights, dtype=float).copy()
-        cap_values = np.asarray(caps, dtype=float)
-        eligible_mask = (
-            np.ones_like(adjusted, dtype=bool)
-            if eligible is None
-            else np.asarray(eligible, dtype=bool)
-        )
-        for _ in range(20):
-            over = adjusted > cap_values
-            if not bool(np.any(over)):
-                break
-            excess = float(np.sum(adjusted[over] - cap_values[over]))
-            adjusted[over] = cap_values[over]
-            capacity = np.clip(cap_values - adjusted, 0.0, None)
-            capacity[~eligible_mask] = 0.0
-            capacity_sum = float(np.sum(capacity))
-            if excess <= 1e-12:
-                break
-            if capacity_sum <= 1e-12:
-                cash_weight += excess
-                break
-            adjusted += excess * (capacity / capacity_sum)
-        return adjusted, cash_weight
-
-    def _apply_portfolio_weight_constraints(
-        self,
-        *,
-        chosen: list[dict[str, Any]],
-        risky_weights: np.ndarray,
-        cash_weight: float,
-        max_single_position_weight: float,
-        max_crypto_weight: float | None,
-        constraints: dict[str, Any],
-    ) -> tuple[np.ndarray, float]:
-        weights = np.asarray(risky_weights, dtype=float)
-        caps = np.full_like(weights, max_single_position_weight, dtype=float)
-        if (
-            constraints.get("max_single_position_weight") is not None
-            and bool(np.any(weights > caps + 1e-9))
-        ):
-            constraints["binding"].append("max_single_position_weight")
-        weights, cash_weight = self._redistribute_weight_excess(
-            weights=weights,
-            caps=caps,
-            cash_weight=cash_weight,
-        )
-        if max_crypto_weight is not None:
-            crypto_mask = np.asarray(
-                [forecast.get("asset_class") == "crypto" for forecast in chosen],
-                dtype=bool,
-            )
-            crypto_weight = float(np.sum(weights[crypto_mask]))
-            if crypto_weight > max_crypto_weight + 1e-9:
-                constraints["binding"].append("max_crypto_weight")
-                excess = crypto_weight - max_crypto_weight
-                weights[crypto_mask] *= max_crypto_weight / max(crypto_weight, 1e-12)
-                non_crypto = ~crypto_mask
-                capacity = np.clip(caps - weights, 0.0, None)
-                capacity[~non_crypto] = 0.0
-                capacity_sum = float(np.sum(capacity))
-                if capacity_sum <= 1e-12:
-                    cash_weight += excess
-                else:
-                    weights += excess * (capacity / capacity_sum)
-                weights, cash_weight = self._redistribute_weight_excess(
-                    weights=weights,
-                    caps=caps,
-                    cash_weight=cash_weight,
-                    eligible=non_crypto,
-                )
-        total = float(np.sum(weights) + cash_weight)
-        if total > 1.0 + 1e-9:
-            scale = max((1.0 - cash_weight) / max(float(np.sum(weights)), 1e-12), 0.0)
-            weights *= scale
-        elif total < 1.0 - 1e-9:
-            cash_weight += 1.0 - total
-        return weights, float(cash_weight)
 
     def _allocation_explanations(
         self,
@@ -1282,7 +1106,7 @@ class SupabaseForecastEngine:
                     "snapshot_used": False,
                 }
             else:
-                confidence_label = str(forecast.get("confidence_label") or "Unknown")
+                confidence_label_str = str(forecast.get("confidence_label") or "Unknown")
                 change = forecast.get("forecast_change") or {}
                 change_note = (
                     f" Latest stored base-return delta is {change['base_return_delta']:+.2%}."
@@ -1292,7 +1116,7 @@ class SupabaseForecastEngine:
                 why = (
                     f"{ticker} is weighted from its risk-adjusted scenario score: "
                     f"base {allocation['base_return']:+.2%}, bear {allocation['bear_return']:+.2%}, "
-                    f"{confidence_label.lower()} confidence.{change_note}"
+                    f"{confidence_label_str.lower()} confidence.{change_note}"
                 )
                 data_quality = forecast.get("data_quality")
             explanations.append(
@@ -1396,7 +1220,7 @@ class SupabaseForecastEngine:
         preferred_asset_classes: list[str] | None = None,
     ) -> dict[str, Any]:
         risk_value = float(np.clip(risk, 0.0, 1.0))
-        constraints = self._portfolio_constraints(
+        constraints = portfolio_constraint_payload(
             max_crypto_weight=max_crypto_weight,
             max_single_position_weight=max_single_position_weight,
             min_cash_weight=min_cash_weight,
@@ -1500,7 +1324,7 @@ class SupabaseForecastEngine:
             risk=risk_value,
             max_asset_weight=max_asset_weight,
         )
-        risky_weights, cash_weight = self._apply_portfolio_weight_constraints(
+        risky_weights, cash_weight = apply_portfolio_weight_constraints(
             chosen=chosen,
             risky_weights=risky_weights,
             cash_weight=cash_weight,

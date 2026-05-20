@@ -23,6 +23,9 @@ export async function callApi(path, options = {}) {
     const error = new Error(message || `Request failed: ${response.status}`);
     error.status = response.status;
     error.retryAfter = Number(response.headers.get("Retry-After") || 0);
+    if (response.status === 429) {
+      showToast("Too many requests — please wait a moment before retrying.", "error");
+    }
     throw error;
   }
   return response.json();

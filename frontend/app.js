@@ -107,7 +107,7 @@ function syncHorizonControls(value) {
     Number.isFinite(parsed) && parsed >= 1
       ? String(Math.min(Math.round(parsed), MAX_FORECAST_HORIZON_DAYS))
       : String(value || "");
-  if (elements.horizon.value !== nextValue) {
+  if (elements.horizon && elements.horizon.value !== nextValue) {
     elements.horizon.value = nextValue;
   }
   if (elements.forecastHorizon && elements.forecastHorizon.value !== nextValue) {
@@ -793,14 +793,16 @@ function updateProgress(action) {
   const completed = completedProgressCount();
   const total = Object.keys(state.progress.actions).length;
   const nextLevel = progressLevelFor(completed, total);
-  const bar = document.querySelector(".progress-bar");
-  const text = document.querySelector(".progress-text");
-  const level = document.querySelector(".progress-level");
-
   state.progress.level = nextLevel;
-  if (bar) bar.style.width = `${(completed / total) * 100}%`;
-  if (text) text.textContent = `${completed}/${total} tasks completed`;
-  if (level) level.textContent = progressLevelLabels[nextLevel];
+  document.querySelectorAll(".progress-bar").forEach(el => {
+    el.style.width = `${(completed / total) * 100}%`;
+  });
+  document.querySelectorAll(".progress-text").forEach(el => {
+    el.textContent = `${completed}/${total} tasks completed`;
+  });
+  document.querySelectorAll(".progress-level").forEach(el => {
+    el.textContent = progressLevelLabels[nextLevel];
+  });
 
   if (nextLevel > previousLevel) {
     pulseProgressWidget();
@@ -900,6 +902,16 @@ cmdResults?.addEventListener("click", (e) => {
   }
   if (type === "Glossary" && value) {
     switchTab("project");
+    requestAnimationFrame(() => {
+      const term = document.querySelector(`[data-glossary-key="${CSS.escape(value)}"]`);
+      if (term) {
+        term.scrollIntoView({ behavior: "smooth", block: "center" });
+        term.classList.add("highlight-pulse");
+        setTimeout(() => term.classList.remove("highlight-pulse"), 1500);
+      } else {
+        elements.glossaryList?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
   }
   closeCommandPalette();
 });
@@ -933,9 +945,9 @@ document.addEventListener("keydown", (e) => {
 document.body.addEventListener("click", (e) => {
   const btn = e.target.closest(".why-btn");
   if (!btn) return;
-  const metric = btn.closest(".metric");
-  if (!metric) return;
-  const slot = metric.querySelector(".why-popover-slot");
+  const container = btn.closest(".metric, .why-container");
+  if (!container) return;
+  const slot = container.querySelector(".why-popover-slot");
   if (!slot) return;
   if (slot.innerHTML) {
     slot.innerHTML = "";

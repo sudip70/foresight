@@ -281,26 +281,21 @@ def _asset_universe_metadata() -> dict[str, dict]:
 
 
 def _artifact_profile_payload(engine, ticker: str) -> dict:
-    asset_class, index, canonical = engine._resolve_ticker(ticker)
-    context = engine._combined_context["assets"][asset_class]
-    latest_index = engine._combined_context["aligned_rows"] - 1
-    latest_date = str(engine._combined_context["dates"][latest_index])
-    price = float(context["risky_prices"][latest_index, index])
-    ohlcv = context["ohlcv"][latest_index, index]
-    lookback_start = max(0, latest_index - 251)
-    ohlcv_window = context["ohlcv"][lookback_start : latest_index + 1, index]
-    metadata = _asset_universe_metadata().get(canonical.upper(), {})
+    data = engine.ticker_raw_data(ticker)
+    metadata = _asset_universe_metadata().get(data["canonical"].upper(), {})
+    ohlcv = data["ohlcv"]
+    ohlcv_window = data["ohlcv_window"]
     return {
-        "ticker": canonical,
-        "asset_class": asset_class,
-        "display_name": metadata.get("display_name") or canonical,
+        "ticker": data["canonical"],
+        "asset_class": data["asset_class"],
+        "display_name": metadata.get("display_name") or data["canonical"],
         "as_of_date": None,
-        "data_as_of": latest_date,
+        "data_as_of": data["latest_date"],
         "source": "local_artifacts",
         "fields": {
             "bid": None,
             "ask": None,
-            "last_sale": price,
+            "last_sale": data["price"],
             "open": float(ohlcv[0]),
             "high": float(ohlcv[1]),
             "low": float(ohlcv[2]),
