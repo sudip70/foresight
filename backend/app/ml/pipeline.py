@@ -43,7 +43,6 @@ from backend.app.ml.utils import (
     forecast_score,
     historical_drawdown,
     portfolio_constraint_payload,
-    redistribute_weight_excess,
     return_caps,
     risk_label,
     soft_cap_return,

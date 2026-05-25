@@ -1,49 +1,153 @@
 # Foresight
 
-Foresight is a split web application for ticker intelligence, scenario forecasting, portfolio simulation, and model explainability.
+Foresight is a full-stack web application for market intelligence, scenario-based forecasting, portfolio simulation, and financial literacy.
 
-The Render deployment is Supabase-first: market overview, ticker profiles, forecasts, and portfolio simulations read from Supabase and do not silently fall back to bundled artifacts. Local development can still enable the experimental PPO/SAC artifact engine for RL diagnostics, backtests, and explainability.
+**Live:** [sudip70.github.io/foresight](https://sudip70.github.io/foresight/)
 
-Phase 1 replaces the legacy Streamlit prototype with:
+**Demo:**
+<p align="center">
+  <img src="foresight_demo.gif" width="100%"/>
+</p>
 
-- a Python backend built with FastAPI
-- a static HTML/CSS/JS frontend for GitHub Pages
-- a cleaned artifact layout for RL inference and backtesting
-- surrogate-based SHAP explanations for allocations
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Backend | Python 3.11, FastAPI, NumPy |
+| Frontend | Vanilla HTML/CSS/JS, Chart.js |
+| Database | Supabase (PostgreSQL) |
+| Hosting | Render (backend), GitHub Pages (frontend) |
+| CI/CD | GitHub Actions |
+| ML | PPO/SAC reinforcement learning, surrogate SHAP |
+
+## Features
+
+### Market Overview
+- Real-time market index tracking (S&P 500, Nasdaq, Dow Jones, TSX) with proxy ETF fallback
+- Interactive index history charts with 20-day moving average (1m / 3m / 6m / 1y / 5y ranges)
+- Market sentiment scoring and top opportunity highlights
+- 56-ticker universe: 25 stocks, 21 ETFs, 10 crypto assets
+
+### Ticker Forecasts
+- Scenario-based price projections (bull / base / bear) with configurable horizons (30–730 days)
+- Confidence scoring and risk classification per ticker
+- Company profile cards with fundamental metrics (P/E, market cap, dividend yield, sector)
+- Forecast change tracking between refreshes
+- Interactive forecast chart with scenario bands
+
+### Portfolio Simulator
+- Dollar-amount portfolio simulation with adjustable risk tolerance (0–1 scale)
+- Multi-asset allocation across stocks, ETFs, and crypto
+- Customizable constraints: max crypto weight, max single position, min cash, preferred asset classes
+- Trade plan generation with per-ticker buy amounts
+- Benchmark comparison (equal-weight, 60/40, all-bond)
+- Class-level allocation donut chart with hover tooltips
+- Allocation explanations and constraint summaries
+
+### Learn Mode
+- Toggle-able educational overlays across all dashboard sections
+- Glossary chips with inline definitions for financial terms
+- Contextual lessons explaining forecasting methodology, risk concepts, and portfolio theory
+
+### About / Diagnostics
+- Data health cards and freshness indicators
+- Model status display and refresh history
+- Project story and methodology documentation
+
+## API Endpoints
+
+All endpoints are served under the `/api` prefix.
+
+### Health & Metadata
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/health` | Health check with dependency status |
+| `GET` | `/api/models` | Model metadata and artifact versions |
+
+### Market Data
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/universe` | Full asset universe (tickers, sectors, asset classes) |
+| `GET` | `/api/tickers/{ticker}/profile` | Company profile and fundamental metrics |
+| `GET` | `/api/market/indices` | Latest market index snapshots |
+| `GET` | `/api/market/indices/{symbol}/history?range=1y` | Index history (1m, 3m, 6m, 1y, 5y) |
+
+### Forecasting
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/forecasts/ticker` | Single-ticker scenario forecast |
+| `POST` | `/api/forecasts/market` | Full-market forecast batch |
+
+### Portfolio & Inference
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/portfolio/simulations` | Portfolio simulation with allocation + trade plan |
+| `POST` | `/api/inference` | RL-based allocation inference |
+| `POST` | `/api/explanations` | Surrogate SHAP explanations for allocations |
+
+### Diagnostics
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/data/refresh/status` | Latest data refresh status and logs |
+| `POST` | `/api/backtests` | Historical backtest with rebalancing |
 
 ## Project Layout
 
-- `backend/`: FastAPI service, canonical inference pipeline, SHAP explainers, tests
-- `frontend/`: static dashboard for GitHub Pages
-- `offline/`: data-repair and offline preparation scripts
-- `artifacts/processed/`: active RL model artifacts and aligned processed arrays
-- `datasets/raw/`: active macroeconomic CSV and downloaded OHLCV market snapshots used by offline scripts
+```
+backend/
+  app/
+    api/routes/       # FastAPI route handlers
+    api/schemas.py    # Pydantic request/response models
+    core/config.py    # Settings and environment config
+    market/           # Forecasting engine, repository, simulation, index refresh
+    ml/               # RL environments, policies, artifacts, SHAP, feature engineering
+  tests/              # 85 automated tests
+frontend/
+  api/                # API client, endpoints config
+  charts/             # Chart.js forecast and index history charts
+  render/             # Section renderers (market, forecast, simulator, diagnostics)
+  state/              # Global state store, glossary, literacy definitions
+  utils/              # DOM helpers, formatters, validation
+config/
+  asset_universe.v1.json     # 56-ticker universe definition
+  market_indices.v1.json     # Index config with proxy ETF fallback tickers
+offline/
+  supabase_refresh.py        # Supabase data refresh pipeline
+  rebuild_market_data.py     # OHLCV rebuild from Yahoo Finance
+  train_ppo_agents.py        # PPO agent training script
+scripts/
+  refresh_supabase_daily.sh  # Daily refresh wrapper
+  boot_backend_daily.sh      # Render cold-start health check
+```
 
-## Runtime Scope
+## Asset Universe
 
-Phase 1 runtime supports:
+| Class | Count | Examples |
+|-------|-------|---------|
+| Stocks | 25 | AAPL, MSFT, GOOGL, NVDA, TSLA, JPM, ... |
+| ETFs | 21 | SPY, QQQ, DIA, VTI, GLD, TLT, EWC, ... |
+| Crypto | 10 | BTC, ETH, SOL, ADA, XRP, DOGE, ... |
 
-- health and dependency checks
-- model and artifact metadata
-- allocation inference
-- projected portfolio value, profit, and upside/downside ranges for the selected horizon
-- trade logs for initial allocations and backtest rebalances
-- surrogate-SHAP explainability
-- deterministic historical backtests
+### Market Indices
 
-Phase 1 does not include:
+| Symbol | Index | Provider Symbol | Proxy ETF |
+|--------|-------|-----------------|-----------|
+| SP500 | S&P 500 | ^GSPC | SPY |
+| NASDAQ | Nasdaq Composite | ^IXIC | QQQ |
+| DOW | Dow Jones Industrial Average | ^DJI | DIA |
+| TSX | S&P/TSX Composite | ^GSPTSE | EWC |
 
-- LLM or sentiment ingestion
-- live trading execution
-- backend-managed retraining jobs
+Index history uses a three-tier fallback: Supabase cached proxy ETF data → yfinance live index → yfinance live proxy ETF.
 
 ## Local Setup
 
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
+pip install --upgrade pip
+pip install -r requirements-dev.txt
 ```
 
 ## Running the Backend
@@ -53,137 +157,84 @@ source .venv/bin/activate
 uvicorn backend.app.main:app --reload
 ```
 
-The API is served from `http://localhost:8000` and the interactive docs are available at `/docs`.
+The API is served at `http://localhost:8000` with interactive docs at `/docs`.
 
 ## Frontend
 
-The frontend is a static site under `frontend/`. Open `frontend/index.html` locally for basic development, or publish the directory to GitHub Pages.
+The frontend is a static site under `frontend/`. Open `frontend/index.html` locally or deploy to GitHub Pages.
 
-The frontend expects the backend base URL to be configurable from the page so it can talk to either local development or the Render deployment.
+The backend URL is configurable from the in-app Settings panel or via `?apiBase=https://your-backend.example.com`.
 
-## GitHub Pages Deployment
+## Deployment
 
-The repository includes `.github/workflows/gh-pages.yml`, which deploys only the static files in `frontend/`. In GitHub, set **Settings → Pages → Build and deployment → Source** to **GitHub Actions** so that workflow is used.
+### GitHub Pages (Frontend)
 
-When the app is served from GitHub Pages or another non-local hostname, the frontend defaults to the Foresight Render backend at `https://foresight-backend-a5qx.onrender.com`. Local development still defaults to `http://localhost:8000`. You can override the backend from the in-app Settings panel or by opening the page with `?apiBase=https://your-backend.example.com`.
+The workflow `.github/workflows/gh-pages.yml` deploys the `frontend/` directory. Set **Settings → Pages → Source** to **GitHub Actions**.
 
-Browsers that previously saved the retired Stockify backend URL are automatically migrated to the current Foresight backend the next time the frontend loads.
+The frontend defaults to the Render backend when served from GitHub Pages, and `localhost:8000` for local development.
 
-If Pages is accidentally configured to deploy from the `main` branch root, the root `index.html` redirects visitors to `frontend/`, but the GitHub Actions deployment is the preferred setup.
+### Render (Backend)
 
-## Artifact Repair
+The `render.yaml` Blueprint creates a free-tier web service with the slim `requirements-render.txt` (FastAPI, uvicorn, NumPy, httpx — no pandas/yfinance/torch).
 
-The current historical artifacts were generated by inconsistent preprocessing steps. Before relying on them in production, run:
+The hosted service runs in Supabase-first mode:
+- Market data, profiles, forecasts, and simulations read from Supabase
+- Index snapshots use proxy ETF rows instead of live provider fetches
+- Memory stays under the 512 MB free-plan cap
 
-```bash
-source .venv/bin/activate
-python offline/repair_processed_artifacts.py
-```
+### Supabase (Database)
 
-This script aligns per-asset processed arrays, writes metadata, and records any trimming performed to repair mismatched row counts.
+1. Apply migrations from `supabase/migrations/`
+2. Set environment variables:
+   ```bash
+   export SUPABASE_URL="https://your-project-ref.supabase.co"
+   export SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+   ```
+3. Run a full data seed:
+   ```bash
+   python offline/supabase_refresh.py --mode full
+   ```
 
-## Market Data Refresh
+### Automated Schedules
 
-The legacy training code built several indicators from `Close` only and reused that series as fake `High`, `Low`, and `Volume`. The active offline pipeline now rebuilds features from real OHLCV inputs downloaded from Yahoo Finance.
+| Workflow | Schedule | Purpose |
+|----------|----------|---------|
+| `daily-market-refresh.yml` | Weekdays 13:35 & 20:15 UTC | Refresh OHLCV, profiles, forecasts, indices |
+| `daily-backend-boot.yml` | Daily 12:00 UTC | Wake Render free-tier with health check |
+| `gh-pages.yml` | On push to main | Deploy frontend to GitHub Pages |
 
-To refresh raw market data and rebuild the processed bundles with OHLCV-derived indicators:
+The refresh pipeline upserts: `asset_universe`, `market_ohlcv_daily`, `asset_profile_snapshots`, `macro_observations`, `market_index_snapshots`, `forecast_snapshots`, and refresh run logs.
 
-```bash
-source .venv/bin/activate
-python offline/rebuild_market_data.py
-```
+## Backend Configuration
 
-This writes:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SUPABASE_URL` | — | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | — | Supabase service role key |
+| `FORESIGHT_MARKET_DATA_PROVIDER` | `yfinance` | Market data source (`yfinance` or `supabase_proxy`) |
+| `FORESIGHT_REQUIRE_SUPABASE` | `false` | Fail fast if Supabase is unavailable |
+| `FORESIGHT_LOAD_ARTIFACT_ENGINE` | `true` | Load RL artifact engine on startup |
+| `FORESIGHT_LAZY_LOAD_ARTIFACT_ENGINE` | `false` | Lazy-load artifact engine on first request |
+| `FORESIGHT_ARTIFACT_POLICY_MODE` | `auto` | Policy mode (`auto`, `signal`, `ppo`, `sac`) |
+| `FORESIGHT_MARKET_INDEX_AUTO_REFRESH` | `false` | Fetch index snapshots on startup |
+| `FRED_API_KEY` | — | FRED API key for macro data (offline jobs) |
 
-- raw downloaded OHLCV snapshots to `datasets/raw/market/*.csv`
-- aligned close-price matrices to `artifacts/processed/*/prices.npy`
-- OHLCV tensors to `artifacts/processed/*/ohlcv.npy`
-- raw and scaled feature arrays for micro and macro inputs
-- updated metadata describing the source date range and feature version
+## Rate Limiting
 
-By default the script reuses the existing scaler pickle files so the current RL artifacts remain as compatible as possible. If you are rebuilding for retraining rather than refreshing live inputs, use `--fit-new-scalers`.
-
-## Supabase Market Data
-
-Foresight can now use Supabase as the source of truth for ticker intelligence, company profile metrics, market index snapshots, OHLCV history, refresh logs, and stored forecast snapshots. The local `.npy` artifacts still power the experimental RL diagnostics unless those models are retrained for a larger universe.
-
-1. Apply the migrations in `supabase/migrations/` to your Supabase project.
-2. Set backend/job secrets:
-
-```bash
-export SUPABASE_URL="https://your-project-ref.supabase.co"
-export SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
-export FORESIGHT_MARKET_DATA_PROVIDER="yfinance"
-```
-
-3. Seed or refresh the expanded universe:
-
-```bash
-source .venv/bin/activate
-python offline/supabase_refresh.py --mode full
-```
-
-4. For scheduled updates, run the incremental job after market open and close:
-
-```bash
-scripts/refresh_supabase_daily.sh
-```
-
-The job is idempotent: it upserts `asset_universe`, `market_ohlcv_daily`, `asset_profile_snapshots`, `macro_observations`, `market_index_snapshots`, `forecast_snapshots`, and refresh run logs. It precomputes default forecast horizons of 30, 90, 180, and 300 days.
-
-The Render Blueprint only creates the free `foresight-backend` web service. Supabase refreshes run from GitHub Actions via `.github/workflows/daily-market-refresh.yml` on weekdays at 13:35 UTC and 20:15 UTC, matching 9:35 AM and 4:15 PM America/Toronto during the current EDT market season. This gives Monday users a fresh morning refresh instead of waiting for an after-close job. The workflow can still be run manually with either incremental or full mode. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as GitHub repository Actions secrets so the scheduled workflow can write to Supabase.
-
-The backend boot workflow in `.github/workflows/daily-backend-boot.yml` runs every day at 12:00 UTC and calls `scripts/boot_backend_daily.sh`, which checks `/api/health` with retries so the Render service wakes up at least once a day. Set the GitHub repository variable `FORESIGHT_BACKEND_BOOT_URL` if the deployed backend URL changes.
-
-The wrapper script supports environment overrides: `FORESIGHT_REFRESH_MODE`, `FORESIGHT_REFRESH_LOOKBACK_DAYS`, `FORESIGHT_REFRESH_FRESHNESS_DAYS`, `FORESIGHT_FORECAST_HORIZONS`, `FORESIGHT_FORECAST_WINDOW_SIZE`, `FORESIGHT_REFRESH_START_DATE`, `FORESIGHT_REFRESH_END_DATE`, and `FORESIGHT_REFRESH_DRY_RUN=true`. Legacy `STOCKIFY_*` env vars are still read as fallbacks during the rename.
-
-The FastAPI app prefers Supabase-backed market data when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present. If they are absent, it falls back to the current artifact-backed dashboard.
-
-For the Render deployment, Supabase is the required market-data source. The included `render.yaml` installs the slim `requirements-render.txt` dependency set and sets `FORESIGHT_ARTIFACT_POLICY_MODE=signal`, so the free 512 MB service can run artifact-backed inference and backtests without importing the SB3/Torch PPO/SAC model stack. The hosted service also excludes `pandas` and `yfinance`; index cards and charts use Supabase proxy rows instead of live provider fetches to keep memory below the free-plan cap. It sets `FORESIGHT_REQUIRE_SUPABASE=true`, `FORESIGHT_LOAD_ARTIFACT_ENGINE=false`, and `FORESIGHT_LAZY_LOAD_ARTIFACT_ENGINE=true`, so market overview, ticker forecasts, profiles, and portfolio simulations come from Supabase immediately while the lightweight artifact engine only preloads for artifact-backed routes. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as Render secret environment variables on `foresight-backend`.
-
-The artifact-backed RL endpoints (`/api/models`, `/api/inference`, `/api/explanations`, and `/api/backtests`) may return a temporary 503 with `Foresight engine is loading in the background` on the first request after a cold start. Retry after the background load completes. Public forecast, inference, and backtest requests are capped to bounded horizons/windows so oversized payloads cannot exhaust the 512 MB Render instance. The hosted `/api/explanations` route requires the full `scikit-learn`/`shap` stack, so keep it for local or paid deployments that install `requirements.txt`. Set `FORESIGHT_LAZY_LOAD_ARTIFACT_ENGINE=false` only if you intentionally want the deployed service to keep artifact-backed RL routes unavailable.
-
-The local artifact rebuild path also reads `config/asset_universe.v1.json`, so rebuilt stock and ETF bundles use the same expanded universe as Supabase. If the rebuilt ticker count no longer matches an older PPO action space, the bundle temporarily switches to the deterministic signal policy until PPO is retrained.
-
-Market index cards first read Supabase snapshots. If snapshots are missing on a fresh restart, `/api/market/indices` fetches the latest configured index levels on demand and caches them for the running backend. Startup index refresh is disabled by default to keep reloads fast. Set `FORESIGHT_MARKET_INDEX_AUTO_REFRESH=true` only if you want the backend to fetch and upsert index snapshots during startup.
-
-## PPO Retraining
-
-Once the OHLCV bundles are refreshed, retrain the stock, crypto, and ETF PPO agents with:
-
-```bash
-source .venv/bin/activate
-python offline/train_ppo_agents.py --total-timesteps 20000 --eval-freq 2000 --device cpu
-```
-
-This script:
-
-- splits each asset bundle chronologically into train and evaluation segments
-- trains a PPO policy against the cleaned observation layout used by the backend
-- rewards horizon portfolio growth, benchmark alpha, and diversification instead of only next-day return
-- applies risk-based cash caps so cash remains a sleeve rather than a default escape allocation
-- backs up the existing `model.zip` before replacing it
-- writes `training_summary.json` and updates bundle metadata with evaluation metrics
-
-The SAC meta-agent should be retrained only after the PPO sub-agents have been refreshed and validated.
-
-The rebuilt SAC meta-agent action space is sleeve-level: stock, crypto, ETF, and optional cash. It learns how much capital to assign to each sub-agent, while the sub-agents choose the assets inside each sleeve.
-
-Even when trained artifacts are present, the backend now applies signal-based fallback logic for underperforming agents, mixes the stock/crypto/ETF agent consensus into the SAC meta-agent output, and then rebalances that allocation through a horizon/diversification layer. Cash is capped by risk appetite, so it can act as a risk tool without becoming the default allocation for balanced users.
+The backend enforces per-IP rate limiting: 60 requests per 60-second window. Stale entries are cleaned every 5 minutes. Clients receive HTTP 429 with a `Retry-After` header when throttled.
 
 ## Tests
 
 ```bash
 source .venv/bin/activate
-pytest backend/tests
+pytest backend/tests/
 ```
 
-The automated tests use synthetic fixture artifacts and fixed-weight policies so API contracts and explainability logic can be verified without touching the production model bundle.
+85 tests covering API contracts, forecast logic, simulation allocation, explainability, artifact validation, and configuration. Tests use synthetic fixture artifacts and fixed-weight policies — no production model or network calls required.
 
 ## Notes
 
-- FastAPI is the only active runtime entrypoint.
-- GitHub Pages serves the frontend as static assets only.
-- Render serves the backend.
-- Retired Streamlit prototypes, experiments, and generated backup artifacts are intentionally excluded from the active repository layout.
-- FRED access, if needed for offline jobs, must come from `FRED_API_KEY` in the environment. No secrets are hard-coded in the repository.
+- FastAPI is the only runtime entrypoint
+- GitHub Pages serves the frontend as static assets
+- Render serves the backend on the free tier
+- No secrets are hardcoded — all credentials come from environment variables
