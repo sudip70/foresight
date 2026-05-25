@@ -411,7 +411,7 @@ def fetch_market_index_history(
         raise ValueError(f"Unsupported market index symbol: {normalized_symbol}")
 
     provider_name = settings.market_data_provider.strip().lower()
-    if provider_name != "yfinance":
+    if provider_name not in ("yfinance", "supabase_proxy"):
         raise ValueError(f"Unsupported market index provider: {settings.market_data_provider}")
 
     end_date = (date.today() + timedelta(days=1)).isoformat()
@@ -449,7 +449,7 @@ def fetch_market_index_history(
     }
 
     return {
-        "source": provider_name,
+        "source": "yfinance",
         "symbol": index["symbol"],
         "label": index["label"],
         "display_name": index["display_name"],

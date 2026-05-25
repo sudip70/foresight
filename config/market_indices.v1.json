@@ -24,6 +24,7 @@
       "label": "TSX",
       "display_name": "S&P/TSX Composite",
       "provider_symbol": "^GSPTSE",
+      "fallback_ticker": "EWC",
       "currency": "CAD",
       "display_order": 3
     },
