@@ -20,7 +20,7 @@ from offline.market_pipeline import (
 
 def test_asset_universes_use_expanded_config() -> None:
     assert len(ASSET_UNIVERSES["stock"]["tickers"]) == 25
-    assert len(ASSET_UNIVERSES["etf"]["tickers"]) == 20
+    assert len(ASSET_UNIVERSES["etf"]["tickers"]) == 21
     assert "AMD" in ASSET_UNIVERSES["stock"]["tickers"]
     assert "XLK" in ASSET_UNIVERSES["etf"]["tickers"]
 

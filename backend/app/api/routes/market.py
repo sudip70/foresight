@@ -185,6 +185,12 @@ def market_index_history(
         ):
             raise HTTPException(status_code=503, detail=message) from exc
         raise HTTPException(status_code=400, detail=message) from exc
+    except ImportError:
+        detail = (
+            f"Market index history for {normalized_symbol} is not yet available. "
+            "Run the data refresh pipeline to populate proxy ETF data."
+        )
+        raise HTTPException(status_code=503, detail=detail)
     except Exception as exc:
         detail = str(exc) or "Market index history is unavailable"
         if repository_error is not None and str(repository_error):

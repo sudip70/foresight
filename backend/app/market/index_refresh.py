@@ -416,11 +416,26 @@ def fetch_market_index_history(
 
     end_date = (date.today() + timedelta(days=1)).isoformat()
     start_date = (date.today() - timedelta(days=lookback_days)).isoformat()
-    history = _fetch_yfinance_market_index_history(
-        index,
-        start_date=start_date,
-        end_date=end_date,
-    )
+
+    used_fallback = False
+    try:
+        history = _fetch_yfinance_market_index_history(
+            index,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except (ValueError, Exception):
+        fallback_ticker = index.get("fallback_ticker")
+        if not fallback_ticker:
+            raise
+        fallback_index = {**index, "provider_symbol": fallback_ticker}
+        history = _fetch_yfinance_market_index_history(
+            fallback_index,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        used_fallback = True
+
     latest = history[-1]
     previous = history[-2] if len(history) > 1 else latest
     first_close = history[0]["close"]
@@ -448,22 +463,34 @@ def fetch_market_index_history(
         "points": len(history),
     }
 
+    display_name = index["display_name"]
+    provider_symbol = index["provider_symbol"]
+    disclaimer = (
+        "Historical index levels are fetched from the configured market data provider "
+        "on request."
+    )
+    if used_fallback:
+        fallback_ticker = index["fallback_ticker"]
+        display_name = f"{index['display_name']} proxy"
+        provider_symbol = fallback_ticker
+        disclaimer = (
+            f"Historical index chart uses {fallback_ticker} ETF as a proxy "
+            f"for {index['provider_symbol']} when live index data is unavailable."
+        )
+
     return {
         "source": "yfinance",
         "symbol": index["symbol"],
         "label": index["label"],
-        "display_name": index["display_name"],
-        "provider_symbol": index["provider_symbol"],
+        "display_name": display_name,
+        "provider_symbol": provider_symbol,
         "currency": index["currency"],
         "range": normalized_range,
         "lookback_days": lookback_days,
         "as_of_date": latest["date"],
         "history": history,
         "summary": summary,
-        "disclaimer": (
-            "Historical index levels are fetched from the configured market data provider "
-            "on request."
-        ),
+        "disclaimer": disclaimer,
     }
 
 
