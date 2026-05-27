@@ -14,8 +14,6 @@
 @media (prefers-reduced-motion: reduce) {
   .tab,
   .tab::after,
-  .learning-progress.level-up,
-  .confetti-piece,
   .workspace.is-active {
     animation: none;
     transition: none;
@@ -115,9 +113,6 @@
     width: min(320px, calc(100vw - 48px));
     box-shadow: var(--panel-shadow);
   }
-
-  .learning-progress { display: none; }
-  .sidebar.is-mobile-open .learning-progress { display: flex; }
 
   .section-head,
   .section-head.with-actions,

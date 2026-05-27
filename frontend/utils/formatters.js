@@ -129,11 +129,7 @@ export function profileText(value) {
   return hasProfileValue(value) ? String(value).trim() : "";
 }
 
-export function signedPercentLabel(value) {
-  if (isMissing(value)) return "Unavailable";
-  const parsed = Number(value);
-  return `${parsed >= 0 ? "+" : ""}${formatPercent(parsed)}`;
-}
+export const signedPercentLabel = formatSignedPercent;
 
 export function assetClassNoun(value) {
   const normalized = String(value || "").toLowerCase();
