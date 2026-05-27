@@ -1,5 +1,12 @@
 # Foresight
 
+![Deploy Frontend](https://github.com/sudip70/foresight/actions/workflows/gh-pages.yml/badge.svg)
+![Market Data Refresh](https://github.com/sudip70/foresight/actions/workflows/daily-market-refresh.yml/badge.svg)
+![Tests](https://img.shields.io/badge/tests-85_passed-brightgreen)
+![Python](https://img.shields.io/badge/python-3.11-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 Foresight is a full-stack web application for market intelligence, scenario-based forecasting, portfolio simulation, and financial literacy.
 
 **Live:** [sudip70.github.io/foresight](https://sudip70.github.io/foresight/)
@@ -10,6 +17,42 @@ Foresight is a full-stack web application for market intelligence, scenario-base
 </p>
 
 ---
+
+## Architecture
+
+```mermaid
+graph TB
+    subgraph "Client"
+        FE["GitHub Pages<br/>(Static Frontend)"]
+    end
+
+    subgraph "Backend — Render Free Tier"
+        API["FastAPI<br/>Market Data · Forecasts<br/>Portfolio Simulation"]
+    end
+
+    subgraph "Database"
+        SB["Supabase (PostgreSQL)<br/>OHLCV · Profiles · Forecasts<br/>Index Snapshots · Refresh Logs"]
+    end
+
+    subgraph "CI/CD — GitHub Actions"
+        GH_PAGES["gh-pages.yml<br/>Deploy frontend on push"]
+        REFRESH["daily-market-refresh.yml<br/>Weekdays 9:35 AM & 4:15 PM ET"]
+        BOOT["daily-backend-boot.yml<br/>Daily health check wake-up"]
+    end
+
+    subgraph "External"
+        YF["Yahoo Finance<br/>(yfinance)"]
+        FRED["FRED API<br/>(Macro data)"]
+    end
+
+    FE -- "REST API calls" --> API
+    API -- "Read market data,<br/>forecasts, profiles" --> SB
+    REFRESH -- "Fetch OHLCV, profiles,<br/>compute forecasts" --> YF
+    REFRESH -- "Macro observations" --> FRED
+    REFRESH -- "Upsert refreshed data" --> SB
+    BOOT -- "GET /api/health" --> API
+    GH_PAGES -- "Deploy frontend/" --> FE
+```
 
 ## Tech Stack
 
