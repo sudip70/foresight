@@ -16,7 +16,9 @@
       }
     </script>
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.js.iife.js"></script>
   </head>
   <body class="disclaimer-pending">
     <svg class="icon-sprite" aria-hidden="true" focusable="false">
@@ -186,16 +188,6 @@
           </button>
         </div>
 
-        <div id="learningProgress" class="learning-progress" aria-label="Learning Progress">
-          <div class="progress-info">
-            <span class="progress-level">Level 1: Novice</span>
-            <span class="progress-text">0/3 tasks completed</span>
-          </div>
-          <div class="progress-track">
-            <div class="progress-bar" style="width: 0%"></div>
-          </div>
-        </div>
-
         <div class="sidebar-bottom">
           <div class="sidebar-toggles">
             <button id="learnModeToggle" class="sidebar-toggle-btn" type="button" aria-pressed="false">
@@ -228,6 +220,10 @@
               </div>
               <button id="saveApiBase">Use Backend</button>
               <p id="apiStatus" class="muted">Waiting for connection.</p>
+              <button id="restartTour" class="sidebar-toggle-btn" type="button">
+                <svg class="nav-icon" aria-hidden="true"><use href="#icon-info-circle"></use></svg>
+                <span class="nav-label">Restart tour</span>
+              </button>
             </div>
           </details>
         </div>
@@ -236,12 +232,6 @@
       <!-- Mobile Top Bar -->
       <header class="mobile-topbar">
         <span class="brand-name">Foresight</span>
-        <div class="mobile-progress" aria-label="Learning progress">
-          <span class="progress-level">Level 1: Novice</span>
-          <div class="progress-track">
-            <div class="progress-bar" style="width: 0%"></div>
-          </div>
-        </div>
         <button id="mobileMenuToggle" class="mobile-menu-btn" aria-label="Menu" aria-expanded="false">☰</button>
       </header>
 

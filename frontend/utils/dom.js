@@ -7,7 +7,7 @@ import {
   signedPercentLabel,
 } from "./formatters.js";
 
-export function hoverTooltip() {
+function hoverTooltip() {
   let tooltip = document.querySelector(".hover-tooltip");
   if (!tooltip) {
     tooltip = document.createElement("div");
@@ -17,7 +17,7 @@ export function hoverTooltip() {
   return tooltip;
 }
 
-export function moveHoverTooltip(event) {
+function moveHoverTooltip(event) {
   const tooltip = hoverTooltip();
   tooltip.style.left = `${event.clientX}px`;
   tooltip.style.top = `${event.clientY}px`;

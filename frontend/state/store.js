@@ -116,16 +116,6 @@ export const state = {
     simulator: false,
     diagnostics: false,
   },
-  progress: {
-    actions: { market: false, forecast: false, simulation: false },
-    level: 1,
-  },
-};
-
-export const progressLevelLabels = {
-  1: "Level 1: Novice",
-  2: "Level 2: Intermediate",
-  3: "Level 3: Advanced",
 };
 
 export const glossary = {

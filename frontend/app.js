@@ -11,7 +11,7 @@ import {
   isAbort,
   isBackendConnectionError,
 } from "./api/client.js";
-import { elements, glossary, progressLevelLabels, state } from "./state/store.js";
+import { elements, glossary, state } from "./state/store.js";
 import { renderForecastChart } from "./charts/forecastChart.js";
 import { renderMarketIndexHistory } from "./charts/marketIndexChart.js";
 import { renderMarket, renderMarketIndices, renderUniverse } from "./render/market.js";
@@ -252,7 +252,6 @@ async function runMarketForecast() {
       throw marketResult.reason;
     }
     renderMarket(marketResult.value);
-    updateProgress("market");
     setBackendEmptyState(false);
   } catch (error) {
     if (isAbort(error)) return;
@@ -297,7 +296,6 @@ async function runTickerForecast(ticker = elements.tickerSelect.value) {
     renderTickerForecast(result);
     renderTickerProfile(profile, result);
     setBackendEmptyState(false);
-    updateProgress("forecast");
   } catch (error) {
     if (isAbort(error)) return;
     setError(elements.tickerMetrics, `Ticker forecast unavailable: ${error.message}`);
@@ -334,7 +332,6 @@ async function runSimulation() {
     });
     renderSimulation(result);
     setBackendEmptyState(false);
-    updateProgress("simulation");
   } catch (error) {
     if (isAbort(error)) return;
     setError(elements.simulationSummary, `Simulation unavailable: ${error.message}`);
@@ -685,6 +682,7 @@ function acceptLegalDisclaimer() {
   const activeNav = [...document.querySelectorAll(".nav-item.is-active, .mobile-nav-item.is-active")]
     .find((item) => item.offsetParent !== null);
   activeNav?.focus();
+  maybeStartTour();
 }
 
 elements.acceptDisclaimer?.addEventListener("click", acceptLegalDisclaimer);
@@ -731,86 +729,6 @@ elements.runBacktest.addEventListener("click", () =>
 
 startApp();
 elements.acceptDisclaimer?.focus();
-
-function completedProgressCount() {
-  return Object.values(state.progress.actions).filter(Boolean).length;
-}
-
-function progressLevelFor(completed, total) {
-  if (completed >= total) return 3;
-  if (completed >= Math.ceil(total * 0.66)) return 2;
-  return 1;
-}
-
-function pulseProgressWidget() {
-  const widget = document.querySelector("#learningProgress");
-  if (!widget) return;
-  widget.classList.remove("level-up");
-  widget.offsetHeight;
-  widget.classList.add("level-up");
-  window.setTimeout(() => widget.classList.remove("level-up"), 900);
-}
-
-function launchLevelConfetti() {
-  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-    showToast("Level 3 reached", "success");
-    return;
-  }
-
-  document.querySelector(".confetti-burst")?.remove();
-  const widget = document.querySelector("#learningProgress");
-  const rect = widget?.getBoundingClientRect();
-  const originX = rect?.width ? rect.left + rect.width / 2 : window.innerWidth / 2;
-  const originY = rect?.height ? rect.top + rect.height / 2 : 96;
-  const colors = ["#21d59b", "#58a6ff", "#f5c542", "#ff6b8a", "#b78cff", "#ffffff"];
-  const burst = document.createElement("div");
-  burst.className = "confetti-burst";
-  burst.setAttribute("aria-hidden", "true");
-  burst.style.setProperty("--origin-x", `${originX}px`);
-  burst.style.setProperty("--origin-y", `${originY}px`);
-
-  for (let index = 0; index < 56; index += 1) {
-    const piece = document.createElement("span");
-    piece.className = "confetti-piece";
-    piece.style.setProperty("--x", `${Math.round((Math.random() - 0.5) * 420)}px`);
-    piece.style.setProperty("--y", `${Math.round(-120 - Math.random() * 300)}px`);
-    piece.style.setProperty("--r", `${Math.round((Math.random() - 0.5) * 720)}deg`);
-    piece.style.setProperty("--delay", `${Math.random() * 120}ms`);
-    piece.style.setProperty("--confetti-color", colors[index % colors.length]);
-    burst.appendChild(piece);
-  }
-
-  document.body.appendChild(burst);
-  showToast("Level 3 reached", "success");
-  window.setTimeout(() => burst.remove(), 1800);
-}
-
-function updateProgress(action) {
-  if (!state.progress.actions[action]) {
-    state.progress.actions[action] = true;
-  }
-  const previousLevel = state.progress.level;
-  const completed = completedProgressCount();
-  const total = Object.keys(state.progress.actions).length;
-  const nextLevel = progressLevelFor(completed, total);
-  state.progress.level = nextLevel;
-  document.querySelectorAll(".progress-bar").forEach(el => {
-    el.style.width = `${(completed / total) * 100}%`;
-  });
-  document.querySelectorAll(".progress-text").forEach(el => {
-    el.textContent = `${completed}/${total} tasks completed`;
-  });
-  document.querySelectorAll(".progress-level").forEach(el => {
-    el.textContent = progressLevelLabels[nextLevel];
-  });
-
-  if (nextLevel > previousLevel) {
-    pulseProgressWidget();
-  }
-  if (previousLevel < 3 && nextLevel === 3) {
-    launchLevelConfetti();
-  }
-}
 
 document.body.addEventListener("mouseover", (event) => {
   const chip = event.target.closest(".glossary-chip");
@@ -954,4 +872,122 @@ document.body.addEventListener("click", (e) => {
   } else {
     slot.innerHTML = `<div class="why-popover">${escapeHtml(btn.dataset.why)}</div>`;
   }
+});
+
+// ── Guided Tour (driver.js) ──
+const TOUR_SEEN_KEY = "foresight-tour-completed";
+
+function buildTourDriver() {
+  const { driver } = window.driver.js;
+  const isMobile = window.matchMedia("(max-width: 768px)").matches;
+  const tabSelector = (tab) =>
+    isMobile ? `.mobile-nav-item[data-tab="${tab}"]` : `.nav-item[data-tab="${tab}"]`;
+
+  const side = isMobile ? "bottom" : "right";
+  return driver({
+    showProgress: true,
+    animate: true,
+    smoothScroll: true,
+    overlayColor: "rgba(0, 0, 0, 0.65)",
+    stagePadding: 6,
+    stageRadius: 10,
+    popoverClass: "foresight-tour-popover",
+    nextBtnText: "Next",
+    prevBtnText: "Back",
+    doneBtnText: "Done",
+    steps: [
+      {
+        element: tabSelector("market"),
+        popover: {
+          title: "Market Overview",
+          description: "Start here. Live index data, ranked opportunities, and market sentiment update when the backend connects.",
+          side,
+          align: "start",
+        },
+      },
+      {
+        element: tabSelector("forecast"),
+        popover: {
+          title: "Ticker Forecast",
+          description: "Pick any ticker to see bear, base, and bull scenario forecasts with confidence scoring.",
+          side,
+          align: "start",
+        },
+      },
+      {
+        element: tabSelector("simulator"),
+        popover: {
+          title: "Portfolio Simulator",
+          description: "Set a dollar amount and risk level, then simulate a diversified portfolio with trade plans and benchmarks.",
+          side,
+          align: "start",
+        },
+      },
+      {
+        element: tabSelector("project"),
+        popover: {
+          title: "About",
+          description: "Project details, architecture, glossary, and transparency notes about how Foresight works.",
+          side,
+          align: "start",
+        },
+      },
+      {
+        element: isMobile ? undefined : "#openCmdPalette",
+        popover: {
+          title: "Quick Search",
+          description: "Search tickers, tabs, and glossary terms. You can also press Cmd+K anytime.",
+          side: "right",
+          align: "start",
+        },
+      },
+      {
+        element: isMobile ? undefined : "#learnModeToggle",
+        popover: {
+          title: "Learn Mode",
+          description: "Toggle this to show educational cards, glossary terms, and explanations in every tab.",
+          side: "right",
+          align: "start",
+        },
+      },
+      {
+        element: isMobile ? undefined : "#themeModeToggle",
+        popover: {
+          title: "Theme",
+          description: "Switch between dark and light mode to suit your preference.",
+          side: "right",
+          align: "start",
+        },
+      },
+      {
+        element: isMobile ? undefined : ".settings-menu",
+        popover: {
+          title: "Settings",
+          description: "Configure the backend URL and estimator window. You can restart this tour from here.",
+          side: "right",
+          align: "start",
+        },
+      },
+    ].filter((step) => step.element !== undefined),
+    onDestroyed: () => {
+      localStorage.setItem(TOUR_SEEN_KEY, "true");
+    },
+  });
+}
+
+function startGuidedTour() {
+  if (!window.driver?.js?.driver) return;
+  const tourDriver = buildTourDriver();
+  tourDriver.drive();
+}
+
+function maybeStartTour() {
+  if (localStorage.getItem(TOUR_SEEN_KEY)) return;
+  setTimeout(startGuidedTour, 500);
+}
+
+document.getElementById("restartTour")?.addEventListener("click", () => {
+  const details = document.querySelector(".settings-menu");
+  if (details) details.open = false;
+  startGuidedTour();
 });

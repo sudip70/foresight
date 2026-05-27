@@ -19,9 +19,7 @@ from backend.app.core.config import get_settings
 from backend.app.market.forecasting import SupabaseForecastEngine
 from backend.app.market.index_refresh import (
     fetch_market_index_history,
-    fetch_market_index_history_from_repository,
     fetch_market_index_snapshots,
-    fetch_market_index_snapshots_from_repository,
     refresh_market_index_snapshots,
 )
 from backend.app.market.repository import build_market_repository
